@@ -10,11 +10,12 @@ from rich.console import Console
 
 from poker.agents.fallback import decision_rng, local_decision
 from poker.agents.personas import assign_seats
-from poker.app.view import action_bar_from, build_view, pot_fractions
+from poker.app.commands import hint_for, raise_to_for_fraction
+from poker.app.view import action_bar_from, build_view
 from poker.engine.state import GameConfig, Street
 from poker.engine.table import Table
 from poker.ui.cards import probe_glyph_width
-from poker.ui.model import RaisePrompt, TableView
+from poker.ui.model import InputLine, TableView
 from poker.ui.seats import COMPACT, FULL
 from poker.ui.table import render_frame
 from poker.ui.theme import THEME
@@ -53,12 +54,11 @@ assert found, "no suitable spot found"
 e, table = found
 legal = e.legal_actions()
 pot = e.state.pot
-half, tq, full = pot_fractions(legal, pot, e.state.current_bet)
+full = raise_to_for_fraction(legal, pot, e.state.current_bet, 1.0)
 view = build_view(e, table, TableView(), acting=0).with_(
     action_bar=action_bar_from(legal, pot),
-    raise_prompt=RaisePrompt(active=True, typed="", min_to=legal.min_to,
-                             max_to=legal.max_to, half_pot=half,
-                             three_quarter_pot=tq, pot_size=full),
+    input_line=InputLine(active=True, text="r pot", cursor=5,
+                         preview=f"raise to ${full}", hint=hint_for(legal)),
     log_lines=(("PF  Walter raises to 12 · Deb calls · YOU call", "log"),
                ("F   Deb checks · Sofia bets 24", "log")),
 )

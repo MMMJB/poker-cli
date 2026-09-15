@@ -48,15 +48,38 @@ class TableRenderable:
         cols, rows = console.size
         layout = choose_layout(cols, rows)
         if layout is None:
-            yield from _too_small(cols, rows).rows(console)
+            yield from _centred(_too_small(cols, rows), console, cols, rows)
             return
 
-        canvas = render_frame(view, layout, tick)
-        for segments in canvas.rows(console):
-            yield from segments
-            yield _NEWLINE
+        yield from _centred(render_frame(view, layout, tick), console, cols, rows)
+
 
 _NEWLINE = Segment("\n")
+
+
+def _centred(canvas: Canvas, console: Console, cols: int, rows: int):
+    """Place a fixed-size canvas in the middle of the terminal.
+
+    The board is drawn at a fixed size so the layout stays stable at any window
+    size; this centres that block in whatever space it lands in.
+
+    Newlines go *between* rows and never after the last one -- a trailing
+    newline on the final row pushes the alternate screen down by one and the
+    top of the board scrolls out of view.
+    """
+    lines = list(canvas.rows(console))
+    left = max(0, (cols - canvas.width) // 2)
+    top = max(0, (rows - len(lines)) // 2)
+    pad = Segment(" " * left) if left else None
+
+    for _ in range(top):
+        yield _NEWLINE
+    for i, segments in enumerate(lines):
+        if i:
+            yield _NEWLINE
+        if pad is not None:
+            yield pad
+        yield from segments
 
 
 def _too_small(cols: int, rows: int) -> Canvas:
@@ -266,86 +289,87 @@ def _draw_bets(canvas: Canvas, view: TableView, layout: Layout) -> None:
 
 
 def _draw_action_bar(canvas: Canvas, view: TableView, layout: Layout) -> None:
+    """The status line above the input: pot, price, and what is legal."""
     bar = view.action_bar
     y = layout.action_y
     style = "action.bad" if bar.error_flash else "action"
+
+    if bar.message:
+        canvas.put(2, y, bar.message[: layout.cols - 4], "prompt")
+        _draw_input_line(canvas, view, layout)
+        return
 
     if not bar.active:
         if view.talk:
             canvas.put(2, y, f'"{view.talk}"'[: layout.cols - 20], "talk")
             speaker = f"\u2014 {view.talk_speaker}"
             canvas.put(layout.cols - len(speaker) - 2, y, speaker, "muted")
-        elif bar.message:
-            canvas.put(2, y, bar.message[: layout.cols - 4], "subtle")
-        _draw_raise_prompt(canvas, view, layout)
+        _draw_input_line(canvas, view, layout)
         return
 
-    opts: list[str] = []
-    if bar.can_fold:
-        opts.append("[f]old")
-    if bar.can_check:
-        opts.append("chec[k]")
-    if bar.can_call:
-        opts.append(f"[c]all {money(bar.to_call)}")
-    if bar.can_bet:
-        opts.append("[r] bet")
-    elif bar.can_raise:
-        opts.append("[r]aise")
-    opts.append(f"[a]ll-in {money(bar.max_to)}")
+    hint = view.input_line.hint
 
-    gap = "   " if layout.cols >= FULL_WIDTH else "  "
-    text = gap.join(opts)
-    opts_x = max(2, layout.cols - len(text) - 2)
-    canvas.put(opts_x, y, text, "action.key")
-
-    # Whatever room the options leave, in descending order of detail.
-    room = opts_x - 3
-    left = f"YOUR ACTION  \u00b7  pot {money(bar.pot)}"
+    full = f"YOUR ACTION  \u00b7  pot {money(bar.pot)}"
     if bar.to_call:
-        left += f"  \u00b7  to call {money(bar.to_call)}"
-    if len(left) > room:
-        left = f"pot {money(bar.pot)}"
-        if bar.to_call:
-            left += f" \u00b7 call {money(bar.to_call)}"
-    if len(left) > room:
-        left = f"pot {money(bar.pot)}"
-    canvas.put(2, y, left[: max(0, room)], style)
+        full += f"  \u00b7  to call {money(bar.to_call)}"
+    short = f"pot {money(bar.pot)}"
+    if bar.to_call:
+        short += f" \u00b7 call {money(bar.to_call)}"
 
-    _draw_raise_prompt(canvas, view, layout)
+    # Keep a real gap between the status and the hint: at one space they read
+    # as a single run-on line.
+    gap = 4
+    left = full
+    for candidate in (full, short):
+        if 2 + len(candidate) + gap + len(hint) + 2 <= layout.cols:
+            left = candidate
+            break
+    else:
+        left = short
+        room = max(0, layout.cols - 2 - len(left) - gap - 2)
+        hint = _truncate_at_separator(hint, room)
+
+    canvas.put(2, y, left, style)
+    if hint:
+        canvas.put(layout.cols - len(hint) - 2, y, hint, "prompt.hint")
+
+    _draw_input_line(canvas, view, layout)
 
 
-def _draw_raise_prompt(canvas: Canvas, view: TableView, layout: Layout) -> None:
-    rp = view.raise_prompt
+def _truncate_at_separator(text: str, room: int) -> str:
+    """Trim to the last whole item rather than cutting mid-number."""
+    if len(text) <= room:
+        return text
+    cut = text.rfind("\u00b7", 0, room)
+    return text[:cut].rstrip() if cut > 0 else ""
+
+
+def _draw_input_line(canvas: Canvas, view: TableView, layout: Layout) -> None:
+    """The editable command line, with a visible block cursor.
+
+    Drawn in three pieces so the cell under the cursor can be inverted: that is
+    what makes it obvious the line is being edited rather than submitted.
+    """
+    line = view.input_line
     y = layout.prompt_y
-    if not rp.active:
+    if not line.active:
         return
 
-    typed = rp.typed or ""
-    value_style = "prompt" if (not typed or rp.in_range) else "prompt.error"
+    prompt = "\u203a "
+    canvas.put(2, y, prompt, "prompt.hint")
+    x = 2 + len(prompt)
 
-    # Shortcuts are placed first so the variable-width hint can yield to them.
-    gap = "   " if layout.cols >= FULL_WIDTH else "  "
-    shortcuts = gap.join([
-        f"[h] \u00bdpot {rp.half_pot}",
-        f"[t] \u00bepot {rp.three_quarter_pot}",
-        f"[p] pot {rp.pot_size}",
-        "[esc] back",
-    ])
-    shortcuts_x = max(2, layout.cols - len(shortcuts) - 2)
-    canvas.put(shortcuts_x, y, shortcuts, "prompt.hint")
+    before, at, after = line.before, line.at, line.after
+    canvas.put(x, y, before, "prompt")
+    canvas.put(x + len(before), y, at, "prompt.cursor")
+    canvas.put(x + len(before) + 1, y, after, "prompt")
 
-    canvas.put(2, y, "raise to \u25b8 ", "prompt.hint")
-    value_x = 12
-    canvas.put(value_x, y, f"{typed}\u2588", value_style)
-
-    tail_x = value_x + len(typed) + 3
-    room = max(0, shortcuts_x - tail_x - 1)
-    if rp.error:
-        canvas.put(tail_x, y, rp.error[:room], "prompt.error")
-    else:
-        hint = f"min {rp.min_to}  max {rp.max_to}"
-        if len(hint) <= room:
-            canvas.put(tail_x, y, hint, "prompt.hint")
+    tail_x = x + len(line.text) + 3
+    room = max(0, layout.cols - tail_x - 2)
+    if line.error:
+        canvas.put(tail_x, y, line.error[:room], "prompt.error")
+    elif line.preview:
+        canvas.put(tail_x, y, f"\u21b5 {line.preview}"[:room], "prompt.preview")
 
 
 def _draw_log(canvas: Canvas, view: TableView, layout: Layout) -> None:

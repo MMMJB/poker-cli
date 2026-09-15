@@ -1,8 +1,13 @@
 """The human action prompt.
 
-A small state machine rendered *inside* the live frame.  Built entirely from
-the engine's ``LegalActions``, which makes an illegal human action
-unrepresentable: a key that is not offered simply does nothing.
+A single editable command line, rendered inside the live frame.  The player
+types, sees exactly what they typed and what it will do, and presses Enter to
+commit.  **Nothing auto-submits**, so no single keypress can fold a hand, and
+any half-typed action can be edited or cleared before it takes effect.
+
+``rich.prompt.Prompt`` is unusable here: it blocks the event loop, writes
+outside the live region and fights the alternate screen, so the editing is done
+by hand against :class:`~poker.ui.keys.KeyReader`.
 """
 
 from __future__ import annotations
@@ -11,18 +16,101 @@ import asyncio
 from dataclasses import replace
 from typing import Callable
 
-from poker.app.view import action_bar_from, pot_fractions
+from poker.app.commands import (
+    QUIT, TOGGLE_REVIEW, Parsed, hint_for, parse,
+)
+from poker.app.view import action_bar_from
 from poker.engine.actions import Action, LegalActions
-from poker.ui.keys import KEY_BACKSPACE, KEY_ENTER, KEY_ESC, KeyReader
-from poker.ui.model import ActionBar, RaisePrompt
+from poker.ui import keys as K
+from poker.ui.keys import KeyReader
+from poker.ui.model import ActionBar, InputLine
 
-QUIT = "__quit__"
-TOGGLE_REVIEW = "__toggle_review__"
+HELP_TEXT = (
+    "fold / f    check / k    call / c    bet <amt>    raise <amt>    all-in / a"
+    "    ·    amounts: a number, min, max, half, 3/4, pot"
+    "    ·    v reviews    q quit"
+)
+
+
+class LineEditor:
+    """A single-line text buffer with a cursor.
+
+    Deliberately a plain object rather than a frozen one: it is mutated in
+    place by the key loop and snapshotted into the immutable view each frame.
+    """
+
+    __slots__ = ("text", "cursor")
+
+    def __init__(self, text: str = "") -> None:
+        self.text = text
+        self.cursor = len(text)
+
+    def clear(self) -> None:
+        self.text = ""
+        self.cursor = 0
+
+    def insert(self, chars: str) -> None:
+        self.text = self.text[: self.cursor] + chars + self.text[self.cursor:]
+        self.cursor += len(chars)
+
+    def backspace(self) -> None:
+        if self.cursor:
+            self.text = self.text[: self.cursor - 1] + self.text[self.cursor:]
+            self.cursor -= 1
+
+    def delete(self) -> None:
+        if self.cursor < len(self.text):
+            self.text = self.text[: self.cursor] + self.text[self.cursor + 1:]
+
+    def delete_word(self) -> None:
+        left = self.text[: self.cursor].rstrip()
+        cut = left.rfind(" ") + 1
+        self.text = self.text[:cut] + self.text[self.cursor:]
+        self.cursor = cut
+
+    def kill_to_end(self) -> None:
+        self.text = self.text[: self.cursor]
+
+    def left(self) -> None:
+        self.cursor = max(0, self.cursor - 1)
+
+    def right(self) -> None:
+        self.cursor = min(len(self.text), self.cursor + 1)
+
+    def home(self) -> None:
+        self.cursor = 0
+
+    def end(self) -> None:
+        self.cursor = len(self.text)
+
+    def apply(self, key: str) -> bool:
+        """Handle an editing key.  Returns True if it was consumed."""
+        if key == K.KEY_BACKSPACE:
+            self.backspace()
+        elif key == K.KEY_DELETE:
+            self.delete()
+        elif key == K.KEY_LEFT:
+            self.left()
+        elif key == K.KEY_RIGHT:
+            self.right()
+        elif key in (K.KEY_HOME, K.KEY_CTRL_A):
+            self.home()
+        elif key in (K.KEY_END, K.KEY_CTRL_E):
+            self.end()
+        elif key == K.KEY_CTRL_U:
+            self.clear()
+        elif key == K.KEY_CTRL_W:
+            self.delete_word()
+        elif key == K.KEY_CTRL_K:
+            self.kill_to_end()
+        elif len(key) == 1 and key.isprintable():
+            self.insert(key)
+        else:
+            return False
+        return True
 
 
 class ActionPrompt:
-    """Drives the two-level prompt: top level, then raise sizing."""
-
     def __init__(
         self,
         keys: KeyReader,
@@ -32,117 +120,116 @@ class ActionPrompt:
         self._keys = keys
         self._publish = publish
         self._flash = flash_seconds
+        self._history: list[str] = []
 
     async def ask(
         self, legal: LegalActions, pot: int, current_bet: int
     ) -> Action | str:
-        """Block until the human commits.  Returns an Action, or ``QUIT``."""
+        """Block until the player commits a line.  Returns an Action or a command."""
         bar = action_bar_from(legal, pot)
-        half, three_q, full = pot_fractions(legal, pot, current_bet)
+        editor = LineEditor()
+        hint = hint_for(legal)
+        error = ""
+        show_help = False
+        history_index = len(self._history)
         self._keys.drain()
 
         while True:
-            self._publish(action_bar=bar, raise_prompt=RaisePrompt())
-            key = (await self._keys.key()) or ""
-            key = key.lower()
-
-            if key == "q":
-                if await self._confirm_quit(bar):
-                    return QUIT
-                continue
-
-            if key == "v":
-                return TOGGLE_REVIEW
-
-            if key == "f" and legal.can_fold:
-                return Action.fold()
-            if key in ("k", " ") and legal.can_check:
-                return Action.check()
-            if key == "c" and legal.can_call:
-                return Action.call()
-            if key == "a" and (legal.can_bet or legal.can_raise):
-                return _aggress(legal, legal.max_to)
-            if key == "r" and (legal.can_bet or legal.can_raise):
-                chosen = await self._ask_amount(bar, legal, pot, half, three_q, full)
-                if chosen is None:
-                    continue
-                return _aggress(legal, chosen)
-
-            await self._flash_error(bar)
-
-    # ------------------------------------------------------------ sub-prompt
-
-    async def _ask_amount(
-        self,
-        bar: ActionBar,
-        legal: LegalActions,
-        pot: int,
-        half: int,
-        three_q: int,
-        full: int,
-    ) -> int | None:
-        typed = ""
-        error = ""
-
-        while True:
-            prompt = RaisePrompt(
-                active=True,
-                typed=typed,
-                min_to=legal.min_to,
-                max_to=legal.max_to,
-                half_pot=half,
-                three_quarter_pot=three_q,
-                pot_size=full,
-                error=error,
+            parsed = parse(editor.text, legal, pot, current_bet)
+            self._publish(
+                action_bar=bar,
+                input_line=InputLine(
+                    active=True,
+                    text=editor.text,
+                    cursor=editor.cursor,
+                    preview=parsed.preview,
+                    # A live error while typing would flicker on every
+                    # keystroke of a longer word, so only show one that was
+                    # raised by actually pressing Enter.
+                    error=error,
+                    hint=HELP_TEXT if show_help else hint,
+                    show_help=show_help,
+                ),
             )
-            self._publish(action_bar=bar, raise_prompt=prompt)
-            key = (await self._keys.key()) or ""
 
-            if key == KEY_ESC:
-                self._publish(action_bar=bar, raise_prompt=RaisePrompt())
-                return None
-            if key == KEY_ENTER:
-                value = prompt.value
-                if value is None:
-                    error = "enter an amount"
-                    continue
-                if value < legal.min_to:
-                    error = f"below the minimum raise of {legal.min_to}"
-                    continue
-                if value > legal.max_to:
-                    # Treat an overshoot as the shove the player clearly meant.
-                    return legal.max_to
-                self._publish(action_bar=bar, raise_prompt=RaisePrompt())
-                return value
-            if key == KEY_BACKSPACE:
-                typed = typed[:-1]
-                error = ""
-                continue
-            if key.isdigit():
-                if len(typed) < 7:
-                    typed += key
-                error = ""
+            key = await self._keys.key()
+            if key is None:
                 continue
 
-            # Letter shortcuts, not digits: 1/2/3 would be swallowed as typed
-            # amounts and the shortcut would never fire.
-            lowered = key.lower()
-            if lowered == "h":
-                typed = str(half)
-                error = ""
-            elif lowered == "t":
-                typed = str(three_q)
-                error = ""
-            elif lowered == "p":
-                typed = str(full)
-                error = ""
-            elif lowered == "a":
-                self._publish(action_bar=bar, raise_prompt=RaisePrompt())
-                return legal.max_to
-            else:
-                error = ""
+            if key == K.KEY_CTRL_C:
+                return QUIT
 
-    # ---------------------------------------------------------------- extras
+            if key == K.KEY_ESC:
+                if editor.text:
+                    editor.clear()       # cancel what was typed
+                    error = ""
+                else:
+                    show_help = False
+                continue
+
+            if key == K.KEY_UP:
+                if history_index > 0:
+                    history_index -= 1
+                    editor.text = self._history[history_index]
+                    editor.end()
+                    error = ""
+                continue
+
+            if key == K.KEY_DOWN:
+                if history_index < len(self._history) - 1:
+                    history_index += 1
+                    editor.text = self._history[history_index]
+                else:
+                    history_index = len(self._history)
+                    editor.clear()
+                editor.end()
+                error = ""
+                continue
+
+            if key == K.KEY_ENTER:
+                result = await self._submit(editor, parsed, bar)
+                if result is _KEEP_EDITING:
+                    error = parsed.error
+                    if not error and editor.text.strip():
+                        error = "type an action, or ? for the list"
+                    continue
+                if result is _SHOW_HELP:
+                    show_help = True
+                    editor.clear()
+                    error = ""
+                    continue
+                self._publish(action_bar=ActionBar(), input_line=InputLine())
+                return result
+
+            if editor.apply(key):
+                error = ""
+                history_index = len(self._history)
+                continue
+
+    async def _submit(self, editor: LineEditor, parsed: Parsed, bar: ActionBar):
+        if not parsed.ok:
+            await self._flash_error(bar)
+            return _KEEP_EDITING
+
+        if parsed.command == "help":
+            return _SHOW_HELP
+
+        if parsed.command == QUIT:
+            if await self._confirm_quit(bar):
+                self._history.append(editor.text.strip())
+                return QUIT
+            # Declined: reset the line rather than leaving "quit" sitting in it
+            # for the next thing they type to land on the end of.
+            editor.clear()
+            return _KEEP_EDITING
+
+        self._history.append(editor.text.strip())
+
+        if parsed.command == TOGGLE_REVIEW:
+            return TOGGLE_REVIEW
+
+        assert parsed.action is not None
+        return parsed.action
 
     async def _flash_error(self, bar: ActionBar) -> None:
         self._publish(action_bar=replace(bar, error_flash=True))
@@ -152,12 +239,22 @@ class ActionPrompt:
     async def _confirm_quit(self, bar: ActionBar) -> bool:
         self._publish(
             action_bar=replace(bar, message="Quit this session? [y/n]"),
-            raise_prompt=RaisePrompt(),
+            input_line=InputLine(active=True, text="", cursor=0,
+                                 hint="y to quit, anything else to stay"),
         )
-        key = (await self._keys.key()) or ""
-        return key.lower() == "y"
+        key = await self._keys.key()
+        return (key or "").lower() == "y"
 
 
-def _aggress(legal: LegalActions, to_amount: int) -> Action:
-    """BET when no bet is outstanding, RAISE otherwise -- the engine is strict."""
-    return Action.bet(to_amount) if legal.can_bet else Action.raise_to(to_amount)
+class _Sentinel:
+    __slots__ = ("name",)
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return self.name
+
+
+_KEEP_EDITING = _Sentinel("KEEP_EDITING")
+_SHOW_HELP = _Sentinel("SHOW_HELP")

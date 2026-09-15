@@ -62,24 +62,35 @@ class ActionBar:
 
 
 @dataclass(frozen=True, slots=True)
-class RaisePrompt:
+class InputLine:
+    """The editable command line.
+
+    Nothing is submitted until Enter, so the player always sees what they are
+    about to do and can edit or clear it first.
+    """
+
     active: bool = False
-    typed: str = ""
-    min_to: int = 0
-    max_to: int = 0
-    half_pot: int = 0
-    three_quarter_pot: int = 0
-    pot_size: int = 0
+    text: str = ""
+    cursor: int = 0
+    preview: str = ""
+    """What Enter will do right now."""
     error: str = ""
+    hint: str = ""
+    """The legal actions, built from the engine so it cannot go stale."""
+    message: str = ""
+    show_help: bool = False
 
     @property
-    def value(self) -> int | None:
-        return int(self.typed) if self.typed.isdigit() else None
+    def before(self) -> str:
+        return self.text[: self.cursor]
 
     @property
-    def in_range(self) -> bool:
-        v = self.value
-        return v is not None and self.min_to <= v <= self.max_to
+    def at(self) -> str:
+        return self.text[self.cursor: self.cursor + 1] or " "
+
+    @property
+    def after(self) -> str:
+        return self.text[self.cursor + 1:]
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +128,7 @@ class TableView:
     talk: str = ""
     talk_speaker: str = ""
     action_bar: ActionBar = field(default_factory=ActionBar)
-    raise_prompt: RaisePrompt = field(default_factory=RaisePrompt)
+    input_line: InputLine = field(default_factory=InputLine)
     review: ReviewView = field(default_factory=ReviewView)
     banner: str = ""
     review_on: bool = True

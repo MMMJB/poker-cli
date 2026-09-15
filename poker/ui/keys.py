@@ -17,10 +17,48 @@ import sys
 import termios
 import tty
 
-KEY_ESC = "\x1b"
-KEY_ENTER = "\r"
-KEY_BACKSPACE = "\x7f"
-KEY_CTRL_C = "\x03"
+KEY_ESC = "escape"
+KEY_ENTER = "enter"
+KEY_BACKSPACE = "backspace"
+KEY_DELETE = "delete"
+KEY_LEFT = "left"
+KEY_RIGHT = "right"
+KEY_UP = "up"
+KEY_DOWN = "down"
+KEY_HOME = "home"
+KEY_END = "end"
+KEY_CTRL_C = "ctrl-c"
+KEY_CTRL_U = "ctrl-u"
+KEY_CTRL_W = "ctrl-w"
+KEY_CTRL_A = "ctrl-a"
+KEY_CTRL_E = "ctrl-e"
+KEY_CTRL_K = "ctrl-k"
+
+# Single control bytes that carry a name rather than inserting a character.
+_CONTROL = {
+    "\r": KEY_ENTER,
+    "\n": KEY_ENTER,
+    "\x7f": KEY_BACKSPACE,
+    "\x08": KEY_BACKSPACE,
+    "\x03": KEY_CTRL_C,
+    "\x01": KEY_CTRL_A,
+    "\x05": KEY_CTRL_E,
+    "\x0b": KEY_CTRL_K,
+    "\x15": KEY_CTRL_U,
+    "\x17": KEY_CTRL_W,
+}
+
+# Final byte of a CSI sequence (ESC [ ...) -> key name.
+_CSI_FINAL = {
+    "A": KEY_UP, "B": KEY_DOWN, "C": KEY_RIGHT, "D": KEY_LEFT,
+    "H": KEY_HOME, "F": KEY_END,
+}
+
+# CSI sequences of the form ESC [ <number> ~
+_CSI_TILDE = {
+    "1": KEY_HOME, "3": KEY_DELETE, "4": KEY_END,
+    "7": KEY_HOME, "8": KEY_END,
+}
 
 
 class KeyReader:
@@ -33,6 +71,7 @@ class KeyReader:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._attached = False
+        self._pending = ""
         self.enabled = False
 
     async def __aenter__(self) -> "KeyReader":
@@ -67,14 +106,66 @@ class KeyReader:
 
     def _on_readable(self) -> None:
         try:
-            data = os.read(self._fd, 64)  # type: ignore[arg-type]
+            data = os.read(self._fd, 1024)  # type: ignore[arg-type]
         except (BlockingIOError, InterruptedError):
             return
         except OSError:
             self.restore()
             return
-        for ch in data.decode("utf-8", errors="ignore"):
-            self._queue.put_nowait(ch)
+        for key in self._decode(data.decode("utf-8", errors="ignore")):
+            self._queue.put_nowait(key)
+
+    def _decode(self, text: str) -> list[str]:
+        """Turn raw bytes into key names, one per keypress.
+
+        Arrow and navigation keys arrive as multi-byte escape sequences, so
+        they have to be reassembled here rather than surfaced as a stray ESC
+        followed by letters -- otherwise pressing Left would type a "D".
+        """
+        buf = self._pending + text
+        self._pending = ""
+        out: list[str] = []
+        i = 0
+
+        while i < len(buf):
+            ch = buf[i]
+
+            if ch != "\x1b":
+                out.append(_CONTROL.get(ch, ch))
+                i += 1
+                continue
+
+            # An escape sequence, or a bare Escape keypress.
+            rest = buf[i + 1:]
+            if not rest:
+                # Nothing follows in this chunk: treat it as the Escape key.
+                # A real sequence arrives in a single read, so this is safe.
+                out.append(KEY_ESC)
+                i += 1
+                continue
+
+            if rest[0] not in ("[", "O"):
+                out.append(KEY_ESC)
+                i += 1
+                continue
+
+            j = i + 2
+            params = ""
+            while j < len(buf) and (buf[j].isdigit() or buf[j] == ";"):
+                params += buf[j]
+                j += 1
+            if j >= len(buf):
+                self._pending = buf[i:]  # incomplete; wait for the rest
+                return out
+
+            final = buf[j]
+            if final == "~":
+                out.append(_CSI_TILDE.get(params.split(";")[0], ""))
+            else:
+                out.append(_CSI_FINAL.get(final, ""))
+            i = j + 1
+
+        return [k for k in out if k]
 
     async def key(self, timeout: float | None = None) -> str | None:
         """Next keypress, or None if ``timeout`` elapses first."""
@@ -96,8 +187,16 @@ class KeyReader:
             with contextlib.suppress(asyncio.QueueEmpty):
                 self._queue.get_nowait()
 
-    def feed(self, text: str) -> None:
-        """Inject keys -- used by tests and the scripted demo."""
-        for ch in text:
-            self._queue.put_nowait(ch)
+    def feed(self, *keys: str) -> None:
+        """Inject key names -- used by tests and the scripted demo.
+
+        Each argument is one keypress, so multi-character names like "enter"
+        stay a single key.
+        """
+        for key in keys:
+            self._queue.put_nowait(key)
         self.enabled = True
+
+    def feed_text(self, text: str) -> None:
+        """Inject each character of ``text`` as its own keypress."""
+        self.feed(*text)

@@ -22,7 +22,8 @@ from poker.agents.client import AgentClient
 from poker.agents.decide import Decision, OpponentAgent, Source, forced_action
 from poker.agents.fallback import decision_rng, local_decision
 from poker.agents.personas import assign_seats, leak_denylist
-from poker.app.input import QUIT, TOGGLE_REVIEW, ActionPrompt
+from poker.app.commands import QUIT, TOGGLE_REVIEW
+from poker.app.input import ActionPrompt
 from poker.app.review import ReviewCoach
 from poker.app.session import HandRecord, SessionStore
 from poker.app.view import build_view, street_tag
@@ -31,8 +32,9 @@ from poker.engine.actions import Action
 from poker.engine.state import GameConfig, Street
 from poker.engine.table import Table
 from poker.ui.cards import probe_glyph_width
+from poker.ui import keys as K
 from poker.ui.keys import KeyReader
-from poker.ui.model import ActionBar, RaisePrompt, ReviewView, TableView
+from poker.ui.model import ActionBar, InputLine, ReviewView, TableView
 from poker.ui.table import TableRenderable, money
 from poker.ui.theme import THEME
 
@@ -166,7 +168,7 @@ class App:
         self._street = Street.PREFLOP
         self.publish(
             review=ReviewView(), talk="", talk_speaker="",
-            action_bar=ActionBar(), raise_prompt=RaisePrompt(),
+            action_bar=ActionBar(), input_line=InputLine(),
             log_lines=(),
         )
         self.decisions: list[dict] = []
@@ -225,7 +227,7 @@ class App:
         result = await self.prompt.ask(
             legal, self.engine.state.pot, self.engine.state.current_bet
         )
-        self.publish(action_bar=ActionBar(), raise_prompt=RaisePrompt())
+        self.publish(action_bar=ActionBar(), input_line=InputLine())
         return result
 
     def _toggle_review(self) -> None:
@@ -306,18 +308,22 @@ class App:
         if review is None:
             return
         self.publish(review=review, action_bar=ActionBar(
-            active=False, message="[enter] next hand    [q] quit"
+            active=False, message="enter: next hand    q: quit"
         ))
         if self.cfg.demo_hands:
             await asyncio.sleep(self.cfg.showdown_pause)
             self.publish(review=ReviewView(), action_bar=ActionBar())
             return
+        # Dismissing a review is not an action that can cost chips, so a single
+        # key is fine here -- unlike the action prompt, which never auto-submits.
         while True:
-            key = (await self.keys.key(timeout=120.0)) or "\r"
+            key = await self.keys.key(timeout=120.0)
+            if key is None:
+                break
             if key.lower() == "q":
                 self.quit = True
                 return
-            if key in ("\r", "\n", " "):
+            if key in (K.KEY_ENTER, " "):
                 break
         self.publish(review=ReviewView(), action_bar=ActionBar())
 

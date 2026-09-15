@@ -9,7 +9,7 @@ from rich.console import Console
 from poker.engine.cards import parse_cards
 from poker.engine.state import PlayerStatus, Street
 from poker.ui.cards import probe_glyph_width
-from poker.ui.model import ActionBar, RaisePrompt, SeatView, TableView
+from poker.ui.model import ActionBar, InputLine, SeatView, TableView
 from poker.ui.seats import COMPACT, FULL
 from poker.ui.table import render_frame
 from poker.ui.theme import THEME
@@ -33,8 +33,9 @@ view = TableView(
     action_bar=ActionBar(active=True, to_call=78, pot=174, can_fold=True,
                          can_call=True, can_raise=True, min_to=156, max_to=287,
                          stack=287),
-    raise_prompt=RaisePrompt(active=True, typed="210", min_to=156, max_to=287,
-                             half_pot=165, three_quarter_pot=205, pot_size=252),
+    input_line=InputLine(active=True, text="raise 210", cursor=9,
+                         preview="raise to $210",
+                         hint="fold  ·  call 78  ·  raise <amt|half|pot>  ·  all-in 287"),
     log_lines=(
         ("PF  Tank raises to 12 · Sofia calls · Walter folds · Deb calls · YOU call", "log"),
         ("F   [As Kd 7c]  Deb checks · Tank bets 36 · Sofia raises to 60 …", "log"),

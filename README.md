@@ -82,12 +82,32 @@ Without installing, `.venv/bin/python -m poker` does the same thing.
 | `--debug` | Show latency, token, cache-hit and cost instrumentation. |
 | `--review-all` | Review every hand, including preflop folds. |
 
-**Controls.** `f` fold · `c` call · `k` check · `r` raise · `a` all-in · `v` toggle reviews · `q` quit.
-In the raise prompt: type an amount, or `h` ½-pot, `t` ¾-pot, `p` pot; `enter` commits,
-`esc` goes back. The prompt is built from the engine's legal actions, so it cannot submit
-something the rules would reject.
+**Controls.** You type your action on a command line and press `enter`. **Nothing
+auto-submits** — a stray keypress can never fold your hand, and you can edit or cancel
+anything before it takes effect.
 
-Needs at least an 80×24 terminal; it uses a roomier layout at 100×32 and above.
+```
+› raise pot   ↵ raise to $46
+```
+
+| Type | Does |
+|---|---|
+| `f` / `fold`, `k` / `check`, `c` / `call` | the obvious |
+| `raise 50`, `r 50`, `raise to 50`, or just `50` | raise to that total |
+| `bet 20` when there's no bet outstanding | bet |
+| `r half`, `r 3/4`, `r pot`, `r min`, `r max` | pot-relative sizing |
+| `a` / `all-in` / `shove` | shove |
+| `?` help · `v` toggle reviews · `q` quit |  |
+
+Full line editing: arrow keys, `home`/`end`, `ctrl-u` clear, `ctrl-w` delete word,
+`ctrl-k` kill to end, `↑`/`↓` for history. `esc` clears the line.
+
+As you type, the right-hand side previews exactly what `enter` will do, or tells you why it
+won't be accepted — the whole thing is built from the engine's legal actions, so it can never
+submit something the rules would reject.
+
+The board is centred in the terminal. Needs at least 80×24; it uses a roomier layout at
+100×32 and above.
 
 ## The opponents
 

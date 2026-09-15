@@ -96,25 +96,6 @@ def action_bar_from(legal, pot: int) -> ActionBar:
     )
 
 
-def pot_fractions(legal, pot: int, current_bet: int) -> tuple[int, int, int]:
-    """Half, three-quarter, and full-pot raise totals, as street totals.
-
-    Sized the way players actually size: you match the bet first, then bet a
-    fraction of the *resulting* pot.  So the raise-to total is
-
-        current_bet + fraction x (pot + call_cost)
-
-    clamped into the legal band.  Displaying the clamped number matters -- the
-    prompt must never show an amount the engine would reject.
-    """
-    after_call = pot + legal.call_cost
-    out: list[int] = []
-    for frac in (0.5, 0.75, 1.0):
-        target = current_bet + round(after_call * frac)
-        out.append(max(legal.min_to, min(int(target), legal.max_to)))
-    return out[0], out[1], out[2]
-
-
 def street_tag(street: Street) -> str:
     return {
         Street.PREFLOP: "PF",
