@@ -1,0 +1,35 @@
+#!/usr/bin/env sh
+# Launcher for the poker trainer.
+#
+# Runs the app from its own checkout no matter what directory you are in, and
+# no matter whether you reached this script directly or through a symlink in
+# ~/.local/bin.  Forwards every argument through to `python -m poker`.
+
+set -eu
+
+# Resolve this script through any chain of symlinks to find the real checkout.
+# `readlink -f` is not portable to older macOS, so walk the chain by hand.
+src=$0
+while [ -L "$src" ]; do
+    dir=$(cd -P "$(dirname "$src")" && pwd)
+    src=$(readlink "$src")
+    case $src in
+        /*) ;;                  # already absolute
+        *) src=$dir/$src ;;     # relative to the link's directory
+    esac
+done
+ROOT=$(cd -P "$(dirname "$src")/.." && pwd)
+
+PYTHON="$ROOT/.venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+    echo "poker: no virtualenv found at $ROOT/.venv" >&2
+    echo "       run $ROOT/install.sh to set one up" >&2
+    exit 1
+fi
+
+# PYTHONPATH makes this work whether or not the package was pip-installed into
+# the venv, so a plain `git pull` is enough to pick up changes.
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
+
+exec "$PYTHON" -m poker "$@"

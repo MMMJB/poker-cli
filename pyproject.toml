@@ -1,0 +1,23 @@
+[project]
+name = "poker-trainer"
+version = "0.1.0"
+description = "A terminal No-Limit Hold'em trainer with LLM-driven opponents."
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=1.0",
+    "rich>=14.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+poker-trainer = "poker.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["poker*"]
+
