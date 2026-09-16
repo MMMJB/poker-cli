@@ -178,6 +178,7 @@ class App:
             log_lines=(),
         )
         self.decisions: list[dict] = []
+        self.prompt.clear_draft()
 
         self.refresh_table()
         await self._animate_deal()
@@ -265,14 +266,20 @@ class App:
 
         self.refresh_table(acting=seat, thinking=seat)
         started = time.monotonic()
-        decision = await agent.act(obs, legal)
+        if self._drafting:
+            decision = await self.prompt.draft_until(agent.act(obs, legal))
+        else:
+            decision = await agent.act(obs, legal)
 
         # Hold the seat on screen for at least its dwell time.  A table where
         # five opponents act instantly is unreadable, and the floor also keeps
         # response time from revealing which model is behind which seat.
         remaining = dwell - (time.monotonic() - started)
         if remaining > 0:
-            await asyncio.sleep(remaining)
+            # The think-time floor is the longest window in the hand and the
+            # most natural moment to prepare a move, so it collects keystrokes
+            # rather than sleeping through them.
+            await self._pause_raw(remaining)
 
         if decision.talk:
             self.publish(talk=decision.talk, talk_speaker=agent.persona.name)
@@ -281,14 +288,28 @@ class App:
     # ------------------------------------------------------------ animation
 
     async def _pause(self, seconds: float) -> None:
-        delay = self.cfg.paced(seconds)
-        if delay > 0:
-            await asyncio.sleep(delay)
+        await self._pause_raw(self.cfg.paced(seconds))
 
     async def _pause_think(self, seconds: float) -> None:
-        delay = self.cfg.paced_think(seconds)
-        if delay > 0:
+        await self._pause_raw(self.cfg.paced_think(seconds))
+
+    async def _pause_raw(self, delay: float) -> None:
+        """Wait an already-scaled number of seconds, drafting if anyone is there."""
+        if delay <= 0:
+            return
+        if self._drafting:
+            await self.prompt.draft_for(delay)
+        else:
             await asyncio.sleep(delay)
+
+    @property
+    def _drafting(self) -> bool:
+        """Whether keystrokes should be collected as a prepared move.
+
+        Never during a demo run: nobody is at the keyboard, and the reader
+        would poll instead of sleeping.
+        """
+        return not self.cfg.demo_hands and self.keys.enabled
 
     async def _animate_deal(self) -> None:
         await self._pause(self.cfg.deal_pause)

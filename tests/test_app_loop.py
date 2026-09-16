@@ -191,13 +191,17 @@ def make_app(tmp_path: Path, **kw):
     """An app wired to a fed KeyReader, without running the full loop."""
     import io as _io
 
+    from poker.app.input import ActionPrompt
     from poker.ui.keys import KeyReader
 
     console = Console(theme=THEME, file=_io.StringIO(), width=100, height=32,
                       force_terminal=False)
     app = App(fast_config(tmp_path, hands=0, **kw), console)
+    # The prompt captures the reader at construction, so both have to be
+    # rebuilt together or drafting reads from an orphaned queue.
     app.keys = KeyReader()
     app.keys.enabled = True
+    app.prompt = ActionPrompt(app.keys, app.publish)
     return app
 
 
@@ -375,3 +379,54 @@ def test_r_opens_a_replay_without_advancing(tmp_path: Path) -> None:
         await asyncio.wait_for(task, 0.5)
 
     asyncio.run(go())
+
+
+def test_keys_pressed_during_an_opponents_turn_become_a_draft(tmp_path: Path) -> None:
+    """End-to-end: type while the table is acting, and it is waiting for you."""
+    app = make_app(tmp_path)
+    # Real pacing, so there is a window in which to type.
+    app.cfg = dataclasses.replace(app.cfg, pace=1.0, offline=True)
+
+    async def go():
+        app.engine = app.table.start_hand()
+        app.decisions = []
+        app.prompt.clear_draft()
+
+        seat = app.engine.current_actor()
+        assert seat != app.cfg.hero_seat
+        task = asyncio.ensure_future(
+            app._seat_acts(seat, app.engine.legal_actions())
+        )
+        await asyncio.sleep(0.02)
+        app.keys.feed(*list("raise 40"))
+        await asyncio.wait_for(task, 5.0)
+        return app.prompt.draft_text
+
+    assert asyncio.run(go()) == "raise 40"
+    assert app._view.input_line.draft is True
+    assert app._view.input_line.text == "raise 40"
+
+
+def test_drafting_is_off_during_a_demo_run(tmp_path: Path) -> None:
+    """Nobody is at the keyboard; the reader would poll instead of sleeping."""
+    app = make_app(tmp_path)
+    app.cfg = dataclasses.replace(app.cfg, demo_hands=5)
+    assert app._drafting is False
+
+
+def test_a_draft_does_not_survive_into_the_next_hand(tmp_path: Path) -> None:
+    """A move prepared for one spot must not leak into an unrelated one."""
+    app = make_app(tmp_path)
+
+    async def go():
+        drafting = asyncio.ensure_future(app.prompt.draft_for(0.2))
+        await asyncio.sleep(0.01)
+        app.keys.feed(*list("all-in"))
+        await drafting
+        assert app.prompt.draft_text == "all-in"
+
+        app.cfg = dataclasses.replace(app.cfg, demo_hands=1, pace=0.0)
+        await app.play_hand()
+        return app.prompt.draft_text
+
+    assert asyncio.run(go()) == ""

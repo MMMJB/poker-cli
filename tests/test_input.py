@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 
 from poker.app.commands import QUIT, TOGGLE_REVIEW, hint_for
 from poker.app.input import ActionPrompt, LineEditor
@@ -329,3 +330,213 @@ def test_the_hint_only_offers_legal_actions() -> None:
     hint = hint_for(CHECKED_TO)
     assert "check" in hint and "bet" in hint
     assert "call" not in hint
+
+
+# --------------------------------------------------------------------------
+# Preparing a move out of turn
+# --------------------------------------------------------------------------
+
+def draft_session(keys_in, wait=0.3):
+    """Type while it is someone else's turn.  Returns (draft text, frames)."""
+    frames: list[dict] = []
+
+    async def go():
+        reader = KeyReader()
+        reader.enabled = True
+        prompt = ActionPrompt(reader, lambda **kw: frames.append(kw),
+                              flash_seconds=0.0)
+        task = asyncio.ensure_future(prompt.draft_for(wait))
+        await asyncio.sleep(0.01)
+        reader.feed(*keys_in)
+        await task
+        return prompt.draft_text
+
+    return asyncio.run(go()), frames
+
+
+def test_typing_out_of_turn_is_captured() -> None:
+    text, frames = draft_session(list("raise 50"))
+    assert text == "raise 50"
+    assert last_line(frames).text == "raise 50"
+
+
+def test_a_draft_is_marked_as_a_draft() -> None:
+    _, frames = draft_session(list("fold"))
+    line = last_line(frames)
+    assert line.draft is True
+    assert line.active is True
+    assert "not your turn" in line.hint
+
+
+def test_a_draft_shows_no_preview() -> None:
+    """The legal actions are not known yet, so a preview would be a guess."""
+    _, frames = draft_session(list("call"))
+    line = last_line(frames)
+    assert line.preview == ""
+    assert line.error == ""
+
+
+def test_enter_does_not_submit_a_draft() -> None:
+    """The whole safety property: preparing a move is not making one."""
+    text, frames = draft_session(list("fold") + [K.KEY_ENTER])
+    assert text == "fold", "Enter must leave the draft staged, not fire it"
+    assert last_line(frames).draft is True
+
+
+def test_a_draft_can_be_edited_and_cleared() -> None:
+    assert draft_session(list("foldx") + [K.KEY_BACKSPACE])[0] == "fold"
+    assert draft_session(list("raise 90") + [K.KEY_ESC])[0] == ""
+    assert draft_session(list("rise") + [K.KEY_HOME, K.KEY_RIGHT, "a"])[0] == "raise"
+
+
+def test_a_draft_carries_into_your_turn_and_still_needs_enter() -> None:
+    frames: list[dict] = []
+
+    async def go():
+        reader = KeyReader()
+        reader.enabled = True
+        prompt = ActionPrompt(reader, lambda **kw: frames.append(kw),
+                              flash_seconds=0.0)
+
+        # Prepare while someone else is acting.
+        drafting = asyncio.ensure_future(prompt.draft_for(0.2))
+        await asyncio.sleep(0.01)
+        reader.feed(*list("raise 50"))
+        await drafting
+        assert prompt.draft_text == "raise 50"
+
+        # Now it is your turn: the text is live, but uncommitted.
+        asking = asyncio.ensure_future(prompt.ask(FACING_BET, 24, 11))
+        await asyncio.sleep(0.05)
+        assert not asking.done(), "a prepared move must not fire on its own"
+        live = next(f["input_line"] for f in reversed(frames)
+                    if "input_line" in f)
+        assert live.text == "raise 50"
+        assert live.draft is False
+        assert "raise to $50" in live.preview
+
+        reader.feed(K.KEY_ENTER)
+        return await asyncio.wait_for(asking, 0.5)
+
+    action = asyncio.run(go())
+    assert action.type is ActionType.RAISE
+    assert action.to_amount == 50
+
+
+def test_the_draft_is_consumed_once() -> None:
+    """It should not reappear on the next decision."""
+    async def go():
+        reader = KeyReader()
+        reader.enabled = True
+        prompt = ActionPrompt(reader, lambda **kw: None, flash_seconds=0.0)
+
+        drafting = asyncio.ensure_future(prompt.draft_for(0.2))
+        await asyncio.sleep(0.01)
+        reader.feed(*list("fold"))
+        await drafting
+
+        asking = asyncio.ensure_future(prompt.ask(FACING_BET, 24, 11))
+        await asyncio.sleep(0.02)
+        reader.feed(K.KEY_ENTER)
+        await asyncio.wait_for(asking, 0.5)
+        return prompt.draft_text
+
+    assert asyncio.run(go()) == ""
+
+
+def test_drafting_runs_for_its_full_duration() -> None:
+    """It replaces a sleep, so it must not return early."""
+    async def go():
+        reader = KeyReader()
+        reader.enabled = True
+        prompt = ActionPrompt(reader, lambda **kw: None, flash_seconds=0.0)
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        await prompt.draft_for(0.2)
+        return loop.time() - start
+
+    assert asyncio.run(go()) >= 0.18
+
+
+def test_draft_until_waits_for_the_work_and_returns_it() -> None:
+    async def go():
+        reader = KeyReader()
+        reader.enabled = True
+        prompt = ActionPrompt(reader, lambda **kw: None, flash_seconds=0.0)
+
+        async def opponent():
+            await asyncio.sleep(0.15)
+            return "decision"
+
+        result = await prompt.draft_until(opponent())
+        return result, prompt.draft_text
+
+    async def with_typing():
+        reader = KeyReader()
+        reader.enabled = True
+        prompt = ActionPrompt(reader, lambda **kw: None, flash_seconds=0.0)
+
+        async def opponent():
+            await asyncio.sleep(0.15)
+            return "decision"
+
+        task = asyncio.ensure_future(prompt.draft_until(opponent()))
+        await asyncio.sleep(0.02)
+        reader.feed(*list("call"))
+        return await task, prompt.draft_text
+
+    assert asyncio.run(go()) == ("decision", "")
+    assert asyncio.run(with_typing()) == ("decision", "call")
+
+
+def test_a_prepared_move_that_no_longer_fits_says_so_immediately() -> None:
+    """Someone raised while you were typing: you should not have to press Enter."""
+    frames: list[dict] = []
+
+    async def go():
+        reader = KeyReader()
+        reader.enabled = True
+        prompt = ActionPrompt(reader, lambda **kw: frames.append(kw),
+                              flash_seconds=0.0)
+        drafting = asyncio.ensure_future(prompt.draft_for(0.2))
+        await asyncio.sleep(0.01)
+        reader.feed(*list("raise 30"))       # legal when prepared
+        await drafting
+
+        # By the time it is your turn the minimum has moved to 22..297.
+        steeper = dataclasses.replace(FACING_BET, min_to=60)
+        asking = asyncio.ensure_future(prompt.ask(steeper, 24, 11))
+        await asyncio.sleep(0.05)
+        line = next(f["input_line"] for f in reversed(frames)
+                    if "input_line" in f)
+        asking.cancel()
+        return line
+
+    line = asyncio.run(go())
+    assert line.text == "raise 30"
+    assert "minimum" in line.error
+
+
+def test_a_prepared_move_that_still_fits_shows_its_preview() -> None:
+    frames: list[dict] = []
+
+    async def go():
+        reader = KeyReader()
+        reader.enabled = True
+        prompt = ActionPrompt(reader, lambda **kw: frames.append(kw),
+                              flash_seconds=0.0)
+        drafting = asyncio.ensure_future(prompt.draft_for(0.2))
+        await asyncio.sleep(0.01)
+        reader.feed(*list("fold"))
+        await drafting
+
+        asking = asyncio.ensure_future(prompt.ask(FACING_BET, 24, 11))
+        await asyncio.sleep(0.05)
+        line = next(f["input_line"] for f in reversed(frames)
+                    if "input_line" in f)
+        asking.cancel()
+        return line
+
+    line = asyncio.run(go())
+    assert line.error == ""
+    assert line.preview == "fold"

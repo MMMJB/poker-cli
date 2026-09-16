@@ -45,6 +45,8 @@ STYLES = {
     "prompt.hint": "grey50",
     "prompt.error": "bold red",
     "prompt.cursor": "bold black on white",
+    "prompt.draft": "grey42",
+    "prompt.draft.cursor": "grey23 on grey50",
     "prompt.preview": "green3",
 
     "log": "grey62",

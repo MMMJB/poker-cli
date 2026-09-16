@@ -360,27 +360,38 @@ def _draw_input_line(canvas: Canvas, view: TableView, layout: Layout) -> None:
 
     Drawn in three pieces so the cell under the cursor can be inverted: that is
     what makes it obvious the line is being edited rather than submitted.
+
+    A draft -- typed while someone else is still to act -- is drawn in grey, so
+    it reads as prepared rather than pending submission.
     """
     line = view.input_line
     y = layout.prompt_y
     if not line.active:
         return
 
-    prompt = "\u203a "
-    canvas.put(2, y, prompt, "prompt.hint")
+    text_style = "prompt.draft" if line.draft else "prompt"
+    cursor_style = "prompt.draft.cursor" if line.draft else "prompt.cursor"
+
+    prompt = "› "
+    canvas.put(2, y, prompt, "prompt.draft" if line.draft else "prompt.hint")
     x = 2 + len(prompt)
 
     before, at, after = line.before, line.at, line.after
-    canvas.put(x, y, before, "prompt")
-    canvas.put(x + len(before), y, at, "prompt.cursor")
-    canvas.put(x + len(before) + 1, y, after, "prompt")
+    canvas.put(x, y, before, text_style)
+    canvas.put(x + len(before), y, at, cursor_style)
+    canvas.put(x + len(before) + 1, y, after, text_style)
 
     tail_x = x + len(line.text) + 3
     room = max(0, layout.cols - tail_x - 2)
-    if line.error:
+    if line.draft:
+        # No preview while drafting: the legal actions are not known until the
+        # action reaches you, and a raise that is legal now may not be by then.
+        note = "ready when it's your turn" if line.text.strip() else ""
+        canvas.put(tail_x, y, note[:room], "prompt.draft")
+    elif line.error:
         canvas.put(tail_x, y, line.error[:room], "prompt.error")
     elif line.preview:
-        canvas.put(tail_x, y, f"\u21b5 {line.preview}"[:room], "prompt.preview")
+        canvas.put(tail_x, y, f"↵ {line.preview}"[:room], "prompt.preview")
 
 
 def _draw_log(canvas: Canvas, view: TableView, layout: Layout) -> None:

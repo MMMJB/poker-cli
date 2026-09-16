@@ -110,6 +110,12 @@ anything before it takes effect.
 | `a` / `all-in` / `shove` | shove |
 | `?` help · `v` toggle reviews · `q` quit |  |
 
+**You can type out of turn.** While the table is still acting, whatever you type is captured as
+a greyed-out draft — prepare your fold, or size a raise, before the action reaches you. It
+carries into the live prompt when your turn comes and *still* has to be committed with Enter;
+preparing a move is not making one. If the spot changed while you were typing, the line tells
+you right away rather than waiting for you to press Enter.
+
 Full line editing: arrow keys, `home`/`end`, `ctrl-u` clear, `ctrl-w` delete word,
 `ctrl-k` kill to end, `↑`/`↓` for history. `esc` clears the line.
 

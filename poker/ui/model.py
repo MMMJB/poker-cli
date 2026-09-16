@@ -83,6 +83,12 @@ class InputLine:
     error: str = ""
     hint: str = ""
     """The legal actions, built from the engine so it cannot go stale."""
+    draft: bool = False
+    """Typed out of turn: shown greyed out and cannot be submitted yet.
+
+    It carries into the live prompt when the action reaches you, where it still
+    has to be committed with Enter -- preparing a move is not making one.
+    """
     message: str = ""
     show_help: bool = False
 

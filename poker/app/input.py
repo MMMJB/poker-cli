@@ -25,6 +25,8 @@ from poker.ui import keys as K
 from poker.ui.keys import KeyReader
 from poker.ui.model import ActionBar, InputLine
 
+DRAFT_HINT = "not your turn yet \u2014 preparing your move"
+
 HELP_TEXT = (
     "fold / f    check / k    call / c    bet <amt>    raise <amt>    all-in / a"
     "    ·    amounts: a number, min, max, half, 3/4, pot"
@@ -121,18 +123,88 @@ class ActionPrompt:
         self._publish = publish
         self._flash = flash_seconds
         self._history: list[str] = []
+        self._draft = LineEditor()
+        """Typed while it is someone else's turn, carried into the next ask()."""
+
+    # ------------------------------------------------------------- drafting
+
+    @property
+    def draft_text(self) -> str:
+        return self._draft.text
+
+    def clear_draft(self) -> None:
+        self._draft.clear()
+
+    def _publish_draft(self, hint: str) -> None:
+        self._publish(input_line=InputLine(
+            active=True,
+            text=self._draft.text,
+            cursor=self._draft.cursor,
+            hint=hint,
+            draft=True,
+        ))
+
+    async def draft_for(self, seconds: float, hint: str = DRAFT_HINT) -> None:
+        """Accept keystrokes for a fixed wait, instead of sleeping through it.
+
+        Deliberately *replaces* the sleep rather than running alongside it: two
+        coroutines awaiting the key queue at once would split the stream
+        between them, and a cancelled `queue.get()` can swallow a keypress.
+        There is exactly one reader at any moment.
+        """
+        if seconds <= 0:
+            return
+        deadline = asyncio.get_running_loop().time() + seconds
+        self._publish_draft(hint)
+        while True:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return
+            key = await self._keys.key(timeout=min(remaining, 0.05))
+            if key is not None and self._draft_key(key):
+                self._publish_draft(hint)
+
+    async def draft_until(self, awaitable, hint: str = DRAFT_HINT):
+        """Accept keystrokes until ``awaitable`` finishes, then return it."""
+        task = asyncio.ensure_future(awaitable)
+        self._publish_draft(hint)
+        while not task.done():
+            key = await self._keys.key(timeout=0.05)
+            if key is not None and self._draft_key(key):
+                self._publish_draft(hint)
+        return await task
+
+    def _draft_key(self, key: str) -> bool:
+        """Apply one key to the draft.  Returns True if the line changed."""
+        if key == K.KEY_ESC:
+            if not self._draft.text:
+                return False
+            self._draft.clear()
+            return True
+        if key == K.KEY_ENTER:
+            # Cannot be submitted out of turn; leave it staged instead.
+            return False
+        return self._draft.apply(key)
 
     async def ask(
         self, legal: LegalActions, pot: int, current_bet: int
     ) -> Action | str:
         """Block until the player commits a line.  Returns an Action or a command."""
         bar = action_bar_from(legal, pot)
-        editor = LineEditor()
+        # Whatever was prepared out of turn becomes the live line -- it still
+        # has to be committed with Enter. Preparing a move is not making one.
+        editor = LineEditor(self._draft.text)
+        carried = bool(self._draft.text.strip())
+        self._draft.clear()
         hint = hint_for(legal)
         error = ""
+        if carried:
+            # A move prepared before the action arrived may no longer be legal
+            # -- someone raised, or the price moved. Say so straight away
+            # rather than waiting for Enter to reject it.
+            error = parse(editor.text, legal, pot, current_bet).error
         show_help = False
         history_index = len(self._history)
-        self._keys.drain()
 
         while True:
             parsed = parse(editor.text, legal, pot, current_bet)
