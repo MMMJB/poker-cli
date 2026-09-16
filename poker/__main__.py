@@ -28,6 +28,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="review every hand, including preflop folds")
     p.add_argument("--demo", type=int, default=0, metavar="N",
                    help="autoplay N hands with no keyboard (for smoke-testing)")
+    p.add_argument("--pace", type=float, default=None, metavar="N",
+                   help="scale every delay (2 = half speed, 0.5 = double speed)")
+    p.add_argument("--slow", action="store_true",
+                   help="slow the action down further (same as --pace 1.6)")
     p.add_argument("--fast", action="store_true",
                    help="remove the think-time pacing between actions")
     p.add_argument("--fps", type=int, default=None, help="render refresh rate")
@@ -46,10 +50,13 @@ def build_config(args: argparse.Namespace) -> Config:
         overrides["review_all"] = True
     if args.demo:
         overrides["demo_hands"] = args.demo
+    # Later flags win, so --pace always overrides the presets.
     if args.fast:
-        overrides["dwell_scale"] = 0.0
-        overrides["showdown_pause"] = 0.4
-        overrides["street_pause"] = 0.1
+        overrides["pace"] = 0.0
+    if args.slow:
+        overrides["pace"] = 1.6
+    if args.pace is not None:
+        overrides["pace"] = max(0.0, args.pace)
     if args.fps:
         overrides["refresh_per_second"] = args.fps
     return dataclasses.replace(CFG, **overrides) if overrides else CFG

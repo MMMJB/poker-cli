@@ -295,7 +295,13 @@ def _draw_action_bar(canvas: Canvas, view: TableView, layout: Layout) -> None:
     style = "action.bad" if bar.error_flash else "action"
 
     if bar.message:
-        canvas.put(2, y, bar.message[: layout.cols - 4], "prompt")
+        hint = view.input_line.hint
+        room = layout.cols - 4
+        if hint:
+            hint_x = max(2, layout.cols - len(hint) - 2)
+            canvas.put(hint_x, y, hint, "prompt.hint")
+            room = hint_x - 4
+        canvas.put(2, y, bar.message[: max(0, room)], "prompt")
         _draw_input_line(canvas, view, layout)
         return
 

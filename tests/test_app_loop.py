@@ -31,7 +31,7 @@ def fast_config(tmp_path: Path, hands: int = 6, **kw):
         showdown_pause=0.0,
         talk_hold=0.0,
         bet_flash=0.0,
-        dwell_scale=0.0,
+        pace=0.0,
         refresh_per_second=1,
         **kw,
     )
@@ -180,3 +180,105 @@ def test_the_indicator_is_absent_when_reviews_are_on(tmp_path: Path) -> None:
     console = Console(theme=THEME, file=_io.StringIO(), width=FULL.cols + 1)
     console.print(render_frame(app._view, FULL, tick=0.0))
     assert "review off" not in console.file.getvalue()
+
+
+# --------------------------------------------------------------------------
+# The between-hands gate
+# --------------------------------------------------------------------------
+
+def make_app(tmp_path: Path, **kw):
+    """An app wired to a fed KeyReader, without running the full loop."""
+    import io as _io
+
+    from poker.ui.keys import KeyReader
+
+    console = Console(theme=THEME, file=_io.StringIO(), width=100, height=32,
+                      force_terminal=False)
+    app = App(fast_config(tmp_path, hands=0, **kw), console)
+    app.keys = KeyReader()
+    app.keys.enabled = True
+    return app
+
+
+def run_gate(app, keys_in, timeout=0.5):
+    """Drive wait_for_next_hand, returning True if it returned (i.e. advanced)."""
+    async def go():
+        task = asyncio.ensure_future(app.wait_for_next_hand())
+        await asyncio.sleep(0.01)
+        app.keys.feed(*keys_in)
+        try:
+            await asyncio.wait_for(task, timeout)
+            return True
+        except asyncio.TimeoutError:
+            task.cancel()
+            return False
+
+    return asyncio.run(go())
+
+
+def test_the_gate_waits_rather_than_dealing_the_next_hand(tmp_path: Path) -> None:
+    """The whole point: no hand starts until the player asks for one."""
+    app = make_app(tmp_path)
+    assert run_gate(app, []) is False, "it advanced without any input"
+
+
+def test_enter_advances_to_the_next_hand(tmp_path: Path) -> None:
+    from poker.ui import keys as K
+
+    app = make_app(tmp_path)
+    assert run_gate(app, [K.KEY_ENTER]) is True
+    assert not app.quit
+
+
+def test_space_also_advances(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    assert run_gate(app, [" "]) is True
+
+
+def test_q_quits_from_the_gate(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    assert run_gate(app, ["q"]) is True
+    assert app.quit
+
+
+def test_v_toggles_reviews_without_advancing(tmp_path: Path) -> None:
+    """Both steps share one event loop: the key queue is loop-bound."""
+    from poker.ui import keys as K
+
+    app = make_app(tmp_path)
+    before = app.coach.enabled
+
+    async def go():
+        task = asyncio.ensure_future(app.wait_for_next_hand())
+        await asyncio.sleep(0.01)
+        app.keys.feed("v")
+        await asyncio.sleep(0.05)
+        assert not task.done(), "'v' must not advance the hand"
+        assert app.coach.enabled is not before
+        app.keys.feed(K.KEY_ENTER)
+        await asyncio.wait_for(task, 0.5)
+
+    asyncio.run(go())
+
+
+def test_unrelated_keys_do_not_advance(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    assert run_gate(app, ["x", "z", "1"]) is False
+
+
+def test_the_gate_shows_the_hand_result_and_the_options(tmp_path: Path) -> None:
+    frames: list[dict] = []
+    app = make_app(tmp_path)
+    app.publish = lambda **kw: frames.append(kw)  # type: ignore[method-assign]
+    run_gate(app, [])
+    line = next(f["input_line"] for f in reversed(frames) if "input_line" in f)
+    bar = next(f["action_bar"] for f in reversed(frames) if "action_bar" in f)
+    assert "next hand" in line.hint and "quit" in line.hint
+    assert bar.message
+
+
+def test_demo_mode_does_not_gate(tmp_path: Path) -> None:
+    """Automated runs must not stall waiting for a keypress."""
+    app = make_app(tmp_path)
+    app.cfg = dataclasses.replace(app.cfg, demo_hands=3)
+    assert run_gate(app, []) is True

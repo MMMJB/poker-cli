@@ -78,7 +78,8 @@ Without installing, `.venv/bin/python -m poker` does the same thing.
 | `--offline` | No API calls. Deterministic local opponents. |
 | `--no-review` | Turn off the post-hand review — by far the costliest call per hand. |
 | `--demo N` | Autoplay N hands with no keyboard — how the app is smoke-tested. |
-| `--fast` | Drop the think-time pacing between actions. |
+| `--slow` / `--pace N` | Slow the action down (`--pace 2` = half speed, `0.5` = double). |
+| `--fast` | Drop the pacing entirely. |
 | `--debug` | Show latency, token, cache-hit and cost instrumentation. |
 | `--review-all` | Review every hand, including preflop folds. |
 
@@ -108,6 +109,16 @@ submit something the rules would reject.
 
 The board is centred in the terminal. Needs at least 80×24; it uses a roomier layout at
 100×32 and above.
+
+**Between hands**, nothing is dealt until you ask for it — `enter` for the next hand, `v` to
+toggle reviews, `q` to quit. The review, if there is one, stays on screen while you decide.
+
+**Pacing.** Each opponent holds the screen for a moment before acting and again after, so a
+hand reads as a sequence of decisions rather than a blur. Offline play stretches the
+*think-time* further (`offline_pace`, 1.6×): what offline is missing is request latency, and
+that only ever filled the think-time floor — the fixed beats like the showdown hold were
+tuned for how long a human needs to read them and don't depend on where the decision came
+from. Roughly 36s a hand offline at the default, 22s at `--pace 0.6`, 62s at `--slow`.
 
 ## The opponents
 

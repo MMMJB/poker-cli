@@ -150,6 +150,7 @@ class App:
                             break
                         await self.show_review()
                         await self.between_hands()
+                        await self.wait_for_next_hand()
                         if self.cfg.demo_hands and played >= self.cfg.demo_hands:
                             break
                 finally:
@@ -186,7 +187,7 @@ class App:
                 if self.cfg.demo_hands:
                     action = self._demo_hero(seat, legal)
                     self.refresh_table(acting=seat)
-                    await asyncio.sleep(self.cfg.deal_pause)
+                    await self._pause(self.cfg.deal_pause)
                 else:
                     while True:
                         action = await self._hero_acts(legal)
@@ -208,6 +209,12 @@ class App:
             self.engine.apply(action)
             self._log_action(seat, action, pot_before)
             self.refresh_table()
+
+            # The dwell above is spent *before* a seat acts. Without a beat
+            # afterwards, the result is wiped by the next seat starting to
+            # think and the hand is unreadable.
+            if seat != self.cfg.hero_seat:
+                await self._pause_think(self.cfg.action_hold)
 
             if self.engine.state.street is not street_before:
                 await self._animate_street_change()
@@ -249,7 +256,7 @@ class App:
             return Decision(action=forced, source=Source.FORCED, model="none")
 
         rng = decision_rng(obs.hand_id, seat, int(obs.street), len(self.decisions))
-        dwell = agent.dwell(obs, rng) * self.cfg.dwell_scale
+        dwell = self.cfg.paced_think(agent.dwell(obs, rng))
 
         self.refresh_table(acting=seat, thinking=seat)
         started = time.monotonic()
@@ -268,12 +275,22 @@ class App:
 
     # ------------------------------------------------------------ animation
 
+    async def _pause(self, seconds: float) -> None:
+        delay = self.cfg.paced(seconds)
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+    async def _pause_think(self, seconds: float) -> None:
+        delay = self.cfg.paced_think(seconds)
+        if delay > 0:
+            await asyncio.sleep(delay)
+
     async def _animate_deal(self) -> None:
-        await asyncio.sleep(self.cfg.deal_pause)
+        await self._pause(self.cfg.deal_pause)
 
     async def _animate_street_change(self) -> None:
         self.refresh_table()
-        await asyncio.sleep(self.cfg.street_pause)
+        await self._pause(self.cfg.street_pause)
 
     async def _animate_showdown(self) -> None:
         if not self.engine.is_complete():
@@ -293,11 +310,16 @@ class App:
         self.table.settle(result)
         self.record = self._build_record(result)
         self.coach.start(self.record)
-        await asyncio.sleep(self.cfg.showdown_pause)
+        await self._pause(self.cfg.showdown_pause)
 
     # --------------------------------------------------------------- review
 
     async def show_review(self) -> None:
+        """Publish the review, if there is one.  Does not wait.
+
+        Waiting is :meth:`wait_for_next_hand`'s job, so the review panel and
+        the continue prompt are one stop rather than two.
+        """
         if not hasattr(self, "record"):
             return
         if self.coach.pending():
@@ -305,27 +327,53 @@ class App:
             self.publish(review=ReviewView(pending=True,
                                            hand_id=self.record.hand_id))
         review = await self.coach.result()
-        if review is None:
+        if review is not None:
+            self.publish(review=review)
+
+    def _hand_summary(self) -> str:
+        record = getattr(self, "record", None)
+        if record is None or record.result is None:
+            return "Hand complete."
+        net = record.result.net.get(self.cfg.hero_seat, 0)
+        if net > 0:
+            return f"Hand #{record.hand_id}: you won {money(net)}."
+        if net < 0:
+            return f"Hand #{record.hand_id}: you lost {money(-net)}."
+        return f"Hand #{record.hand_id}: you broke even."
+
+    async def wait_for_next_hand(self) -> None:
+        """Hold until the player asks for the next hand.
+
+        Hands used to run straight into each other, so the result of one was
+        easy to miss entirely.  Nothing is dealt until this returns.
+        """
+        if self.cfg.demo_hands or self.quit:
+            if self.cfg.demo_hands:
+                await self._pause(self.cfg.showdown_pause)
+                self.publish(review=ReviewView(), action_bar=ActionBar())
             return
-        self.publish(review=review, action_bar=ActionBar(
-            active=False, message="enter: next hand    q: quit"
-        ))
-        if self.cfg.demo_hands:
-            await asyncio.sleep(self.cfg.showdown_pause)
-            self.publish(review=ReviewView(), action_bar=ActionBar())
-            return
-        # Dismissing a review is not an action that can cost chips, so a single
-        # key is fine here -- unlike the action prompt, which never auto-submits.
+
+        summary = self._hand_summary()
+        hint = "enter: next hand   \u00b7   v: reviews on/off   \u00b7   q: quit"
         while True:
-            key = await self.keys.key(timeout=120.0)
+            self.publish(
+                action_bar=ActionBar(active=False, message=summary),
+                input_line=InputLine(active=True, hint=hint),
+            )
+            key = await self.keys.key()
             if key is None:
-                break
-            if key.lower() == "q":
+                continue
+            lowered = key.lower()
+            if lowered == "q":
                 self.quit = True
                 return
+            if lowered == "v":
+                self._toggle_review()
+                continue
             if key in (K.KEY_ENTER, " "):
-                break
-        self.publish(review=ReviewView(), action_bar=ActionBar())
+                self.publish(review=ReviewView(), action_bar=ActionBar(),
+                             input_line=InputLine())
+                return
 
     async def between_hands(self) -> None:
         self.store.append_hand(self.record)

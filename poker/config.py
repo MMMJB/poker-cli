@@ -18,6 +18,13 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
 def _env_int(name: str, default: int) -> int:
     try:
         return int(os.environ[name])
@@ -101,7 +108,7 @@ class Config:
     min_rows: int = 24
     refresh_per_second: int = 20
 
-    # --- pacing (seconds) -------------------------------------------------
+    # --- pacing (seconds, before the multipliers below) --------------------
     deal_pause: float = 0.40
     card_stagger: float = 0.10
     street_pause: float = 0.80
@@ -109,12 +116,39 @@ class Config:
     showdown_pause: float = 2.40
     talk_hold: float = 1.60
     bet_flash: float = 0.15
-    dwell_scale: float = 1.0
-    """Multiplier on each seat's minimum think time.
+    action_hold: float = 0.45
+    """How long an action stays on screen after it resolves.
 
-    0.0 removes the pacing entirely, which is what automated runs want; the
-    default 1.0 is what makes the table readable to a human.
+    The think-time dwell happens *before* a seat acts, so without this the
+    result of the action is replaced almost immediately by the next seat
+    starting to think, and the hand is hard to follow.
     """
+
+    pace: float = 1.0
+    """Global multiplier on every delay.  0.0 removes pacing entirely."""
+    offline_pace: float = 1.6
+    """Extra multiplier on *think time only*, when offline.
+
+    What offline play is missing is request latency, and that only ever filled
+    the think-time floor.  The fixed beats -- dealing, the street change, the
+    showdown hold -- were tuned for how long a human needs to read them and do
+    not depend on where the decision came from, so they are left alone.
+    """
+
+    @property
+    def effective_pace(self) -> float:
+        """The multiplier on think time, which is what offline stretches."""
+        if self.pace <= 0:
+            return 0.0
+        return self.pace * (self.offline_pace if self.offline else 1.0)
+
+    def paced(self, seconds: float) -> float:
+        """Scale a fixed animation beat."""
+        return 0.0 if self.pace <= 0 else seconds * self.pace
+
+    def paced_think(self, seconds: float) -> float:
+        """Scale a think-time delay, including the offline padding."""
+        return seconds * self.effective_pace
 
     # --- agents -----------------------------------------------------------
     review_enabled: bool = True
@@ -177,6 +211,7 @@ class Config:
             log_dir=Path(os.environ.get("POKER_LOG_DIR",
                                         str(Path.home() / ".poker-trainer"))),
             refresh_per_second=_env_int("POKER_FPS", 20),
+            pace=_env_float("POKER_PACE", 1.0),
         )
 
 
