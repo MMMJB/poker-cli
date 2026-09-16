@@ -142,11 +142,11 @@ def view_for(**kw) -> TableView:
     return TableView(**{**base, **kw})
 
 
-# The real draft hints, so the rendering assertions below test what ships.
-from poker.app.input import DRAFT_HINT, DRAFT_HINT_SHORT  # noqa: E402
+# The real draft hint, so the rendering assertions below test what ships.
+from poker.app.input import DRAFT_HINT  # noqa: E402
 
 DRAFT = InputLine(active=True, text="raise 40", cursor=8, draft=True,
-                  hint=DRAFT_HINT, hint_short=DRAFT_HINT_SHORT)
+                  hint=DRAFT_HINT)
 LIVE = InputLine(active=True, text="raise 60", cursor=8, preview="raise to $60",
                  hint="fold  ·  call 24  ·  raise")
 
