@@ -66,6 +66,10 @@ cp .env.example .env    # then edit it
 poker
 ```
 
+If the top-right badge says `OFFLINE`, it names the cause — `no API credit`, `bad API key`,
+`no connection`. The full message is repeated when you quit. Live play is checked once at
+startup, so after fixing the cause you need to restart.
+
 `.env` is gitignored and never committed. Anything already exported in your shell wins over
 it, so `ANTHROPIC_API_KEY=... poker` still overrides for a single run. A `.env` in
 `~/.poker-trainer/` works too, which is handy when the checkout lives somewhere transient.

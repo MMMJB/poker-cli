@@ -12,6 +12,7 @@ import io
 import json
 from pathlib import Path
 
+import pytest
 from rich.console import Console
 
 from poker.app.loop import App
@@ -282,3 +283,64 @@ def test_demo_mode_does_not_gate(tmp_path: Path) -> None:
     app = make_app(tmp_path)
     app.cfg = dataclasses.replace(app.cfg, demo_hands=3)
     assert run_gate(app, []) is True
+
+
+# --------------------------------------------------------------------------
+# Saying *why* live play is unavailable
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("error,expected", [
+    ("Your credit balance is too low to access the Anthropic API.",
+     "no API credit"),
+    ("ANTHROPIC_API_KEY is missing or invalid", "bad API key"),
+    ("cannot reach the Anthropic API -- check your connection", "no connection"),
+    ("this key may not use claude-opus-5", "key lacks access"),
+    ("model not available: claude-fable-5-1", "model unavailable"),
+    ("claude-sonnet-5: API error 503", "API error"),
+])
+def test_the_banner_names_the_cause(error: str, expected: str) -> None:
+    """A bare 'OFFLINE' does not tell you whether it is your key or your bill."""
+    from poker.app.loop import offline_banner
+
+    banner = offline_banner(error)
+    assert banner.startswith("OFFLINE")
+    assert expected in banner
+
+
+def test_the_reason_survives_the_start_of_a_hand(tmp_path: Path) -> None:
+    """Regression: it used to be written to the log, which play_hand clears.
+
+    The explanation was gone before the first frame the player ever saw, so all
+    that was left was an unexplained OFFLINE badge.
+    """
+    app = make_app(tmp_path)
+    app.offline_reason = "Your credit balance is too low."
+    app.publish(banner="OFFLINE · no API credit")
+
+    app.engine = app.table.start_hand()
+    app._log_lines = []          # what play_hand does
+    app._render_log()
+
+    assert app._view.banner == "OFFLINE · no API credit"
+    assert app.offline_reason
+
+
+def test_the_full_reason_is_repeated_on_exit(tmp_path: Path) -> None:
+    import io as _io
+
+    app = make_app(tmp_path)
+    app.offline_reason = "Your credit balance is too low to access the API."
+    app.console = Console(theme=THEME, file=_io.StringIO(), width=100)
+    app._print_farewell()
+    out = app.console.file.getvalue()
+    assert "credit balance" in out
+    assert "nothing was billed" in out
+
+
+def test_no_offline_notice_when_everything_is_fine(tmp_path: Path) -> None:
+    import io as _io
+
+    app = make_app(tmp_path)
+    app.console = Console(theme=THEME, file=_io.StringIO(), width=100)
+    app._print_farewell()
+    assert "Played offline" not in app.console.file.getvalue()

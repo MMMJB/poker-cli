@@ -91,6 +91,8 @@ class App:
         self._log_lines: list[tuple[str, str]] = []
         self._street_parts: list[str] = []
         self._street: Street | None = None
+        self.offline_reason = ""
+        """Why live play is unavailable, if it is.  Shown in the banner and again on exit."""
 
     # ------------------------------------------------------------ publishing
 
@@ -124,9 +126,11 @@ class App:
                 models += [self.cfg.analyst_model, self.cfg.translator_model]
             error = await self.client.preflight(models)
             if error:
-                banner = "OFFLINE"
-                self._note(f"API unavailable -- {error}", "prompt.error")
-                self._note("Playing against the local opponents instead.", "subtle")
+                # The cause goes in the banner, not just the log: the log is
+                # cleared at the start of every hand, so a note written here
+                # is gone before the first frame the player actually reads.
+                self.offline_reason = error
+                banner = offline_banner(error)
                 for agent in self.agents.values():
                     agent.degraded = True
                 self.coach.degraded = True
@@ -449,6 +453,15 @@ class App:
     def _print_farewell(self) -> None:
         hero = self.table.human
         self.console.print()
+        if self.offline_reason:
+            self.console.print(
+                f"[prompt.error]Played offline:[/] {self.offline_reason}"
+            )
+            self.console.print(
+                "[subtle]The opponents used their local policies, so nothing "
+                "was billed.[/]"
+            )
+            self.console.print()
         self.console.print(
             f"[title]Session over.[/]  {hero.hands_played} hands, "
             f"net [{'seat.stack' if hero.profit >= 0 else 'prompt.error'}]"
@@ -457,6 +470,27 @@ class App:
         if self.client is not None and self.cfg.debug_hud:
             self.console.print(f"[debug]{self.client.usage.summary()}[/]")
         self.console.print(f"[subtle]Hand histories: {self.store.directory}[/]")
+
+
+def offline_banner(error: str) -> str:
+    """A short, specific reason for the top-right badge.
+
+    A bare "OFFLINE" tells the player nothing about whether it is their key,
+    their billing, their network, or a deliberate flag.
+    """
+    lowered = error.lower()
+    if any(w in lowered for w in ("credit balance", "billing", "quota",
+                                  "purchase", "insufficient funds")):
+        return "OFFLINE \u00b7 no API credit"
+    if any(w in lowered for w in ("api key", "authentication", "missing or invalid")):
+        return "OFFLINE \u00b7 bad API key"
+    if any(w in lowered for w in ("cannot reach", "connection")):
+        return "OFFLINE \u00b7 no connection"
+    if "may not use" in lowered or "permission" in lowered:
+        return "OFFLINE \u00b7 key lacks access"
+    if "not available" in lowered or "not found" in lowered:
+        return "OFFLINE \u00b7 model unavailable"
+    return "OFFLINE \u00b7 API error"
 
 
 def _view_fields(view: TableView) -> dict:
