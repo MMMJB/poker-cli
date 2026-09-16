@@ -440,9 +440,10 @@ class App:
     def _table_label(self) -> str:
         left = ""
         if self.cfg.hands_per_table:
-            left = f", {self.cfg.hands_per_table - self.hands_at_table} until the next"
+            remaining = max(0, self.cfg.hands_per_table - self.hands_at_table)
+            left = f" ({remaining} to go)"
         return (f"table {self.table_number} \u00b7 {self.seat_size}-handed "
-                f"\u00b7 {self.hands_at_table} hands here{left}")
+                f"\u00b7 {self.hands_at_table} hands{left}")
 
     def _hand_summary(self) -> str:
         record = getattr(self, "record", None)
@@ -470,13 +471,15 @@ class App:
         summary = self._hand_summary()
         hint = ("enter: next   \u00b7   r: replay   \u00b7   t: new table   "
                 "\u00b7   v: reviews   \u00b7   q: quit")
+        hint_short = "enter \u00b7 r replay \u00b7 t table \u00b7 v reviews \u00b7 q quit"
         while True:
             self.publish(
                 action_bar=ActionBar(
                     active=False,
                     message=f"{summary}   \u00b7   {self._table_label()}",
                 ),
-                input_line=InputLine(active=True, hint=hint),
+                input_line=InputLine(active=True, hint=hint,
+                                     hint_short=hint_short),
             )
             key = await self.keys.key()
             if key is None:

@@ -83,6 +83,8 @@ class InputLine:
     error: str = ""
     hint: str = ""
     """The legal actions, built from the engine so it cannot go stale."""
+    hint_short: str = ""
+    """Used instead of ``hint`` when the full one will not fit the width."""
     draft: bool = False
     """Typed out of turn: shown greyed out and cannot be submitted yet.
 

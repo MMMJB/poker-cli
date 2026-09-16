@@ -302,14 +302,16 @@ def _draw_action_bar(canvas: Canvas, view: TableView, layout: Layout) -> None:
     style = "action.bad" if bar.error_flash else "action"
 
     if bar.message:
-        hint = view.input_line.hint
-        room = layout.cols - 4
-        if hint:
-            hint_x = max(2, layout.cols - len(hint) - 2)
-            canvas.put(hint_x, y, hint, "prompt.hint")
-            room = hint_x - 4
-        canvas.put(2, y, bar.message[: max(0, room)], "prompt")
+        # The hint goes on the prompt row, not this one. Sharing a row meant
+        # the hint won and the message -- which says what just happened -- got
+        # cut off mid-word.
+        canvas.put(2, y, _truncate_at_separator(bar.message, layout.cols - 4),
+                   "prompt")
         _draw_input_line(canvas, view, layout)
+        hint = _fitting_hint(view.input_line, layout.cols - 8)
+        if hint:
+            canvas.put(max(2, layout.cols - len(hint) - 2), layout.prompt_y,
+                       hint, "prompt.hint")
         return
 
     if not bar.active:
@@ -349,12 +351,30 @@ def _draw_action_bar(canvas: Canvas, view: TableView, layout: Layout) -> None:
     _draw_input_line(canvas, view, layout)
 
 
+def _fitting_hint(line, room: int) -> str:
+    """The fullest hint that fits, preferring a shorter wording to a cut one.
+
+    Truncating a list of keys silently removes options; a compact wording keeps
+    all of them.
+    """
+    if len(line.hint) <= room:
+        return line.hint
+    if line.hint_short and len(line.hint_short) <= room:
+        return line.hint_short
+    return _truncate_at_separator(line.hint_short or line.hint, room)
+
+
 def _truncate_at_separator(text: str, room: int) -> str:
-    """Trim to the last whole item rather than cutting mid-number."""
+    """Trim to the last whole item rather than cutting mid-word."""
     if len(text) <= room:
         return text
+    if room <= 0:
+        return ""
     cut = text.rfind("\u00b7", 0, room)
-    return text[:cut].rstrip() if cut > 0 else ""
+    if cut > 0:
+        return text[:cut].rstrip()
+    cut = text.rfind(" ", 0, room)
+    return text[:cut].rstrip() if cut > 0 else text[:room]
 
 
 def _draw_input_line(canvas: Canvas, view: TableView, layout: Layout) -> None:
