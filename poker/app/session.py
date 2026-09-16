@@ -95,6 +95,7 @@ class ResumedSession:
     hand_number: int
     bought_in: dict[int, int]
     hands_played: int
+    table_number: int = 0
 
 
 class SessionStore:
@@ -140,6 +141,7 @@ class SessionStore:
             hand_number=int(data["hand_number"]),
             bought_in={int(k): int(v) for k, v in data.get("bought_in", {}).items()},
             hands_played=int(data.get("hands_played", 0)),
+            table_number=int(data.get("table_number", 0)),
         )
 
     # ----------------------------------------------------------------- write
@@ -159,7 +161,7 @@ class SessionStore:
         except OSError:
             pass  # a logging failure must never interrupt play
 
-    def save(self, table: Table) -> None:
+    def save(self, table: Table, table_number: int = 0) -> None:
         self._ensure()
         payload = {
             "session_seed": table.session_seed,
@@ -168,6 +170,7 @@ class SessionStore:
             "hand_number": table.hand_number,
             "bought_in": {str(s.seat): s.total_bought_in for s in table.seats},
             "hands_played": table.human.hands_played,
+            "table_number": table_number,
             "saved_at": datetime.now().isoformat(timespec="seconds"),
         }
         tmp = self._state_path.with_suffix(".json.tmp")

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Iterable, Sequence
 
-from poker.agents.personas import Persona
+from poker.agents.personas import Seated
 from poker.engine.events import Event, EventType
 from poker.engine.hand import Observation
 from poker.engine.state import PlayerStatus
@@ -66,8 +66,11 @@ Several of your tendencies are frequencies -- "you 3-bet about 18% of the time",
 """
 
 
-def build_system_prompt(persona: Persona) -> str:
-    """Stable for the whole session -- never interpolate hand state in here.
+def build_system_prompt(persona: Seated) -> str:
+    """Stable for as long as this seat exists -- never put hand state in here.
+
+    It changes when the player moves tables, because the name changes; within a
+    table it is byte-identical every request, which is what the cache needs.
 
     Anything volatile (a stack size, a hand number) would invalidate the cached
     prefix on every single request.

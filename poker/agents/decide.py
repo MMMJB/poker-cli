@@ -24,7 +24,7 @@ from poker.agents.client import (
     AgentClient, ModelRefusal, TruncatedOutput, _message_of, is_billing_error,
 )
 from poker.agents.fallback import decision_rng, local_decision, local_talk
-from poker.agents.personas import Persona
+from poker.agents.personas import Seated
 from poker.agents.prompts import build_reask, build_system_prompt, render_state
 from poker.agents.schema import MAX_TALK_CHARS, RawDecision
 from poker.config import TIER_DOWNGRADE, TIERS, Config
@@ -126,7 +126,7 @@ def coerce(raw: RawDecision, legal: LegalActions) -> tuple[Action | None, Verdic
     return None, Verdict.MUST_REASK, f"unknown action {action!r}"
 
 
-def clean_talk(text: str, persona: Persona, rng: random.Random,
+def clean_talk(text: str, persona: Seated, rng: random.Random,
                denylist: tuple[str, ...]) -> str:
     """Trim, filter, and apply the persona's talk rate."""
     text = (text or "").strip().strip('"')
@@ -153,7 +153,7 @@ class OpponentAgent:
 
     def __init__(
         self,
-        persona: Persona,
+        persona: Seated,
         seat: int,
         client: AgentClient | None,
         config: Config,

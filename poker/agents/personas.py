@@ -44,9 +44,35 @@ class FallbackPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class Seated:
+    """One persona at one table, under one name."""
+
+    persona: "Persona"
+    name: str
+
+    @property
+    def key(self) -> str:
+        return self.persona.key
+
+    @staticmethod
+    def of(persona: "Persona", name: str | None = None) -> "Seated":
+        """Seat a persona under a given name, or its first."""
+        return Seated(persona, name or persona.names[0])
+
+    def __getattr__(self, item):
+        return getattr(self.persona, item)
+
+
+@dataclass(frozen=True, slots=True)
 class Persona:
     key: str
-    name: str
+    names: tuple[str, ...]
+    """Nameplates this archetype can appear under.
+
+    A new table draws a fresh one, so the same archetype is not recognisable by
+    name across tables.  The point of the trainer is reading how someone plays,
+    not remembering who they were last session.
+    """
     archetype: str
     tier: str
     talk_rate: float
@@ -65,7 +91,7 @@ class Persona:
 
 DEB = Persona(
     key="deb",
-    name="Deb",
+    names=("Deb", "Marcy", "Lorraine", "Pam", "Sandra", "Gail"),
     archetype="loose-passive calling station",
     tier="fast",
     talk_rate=0.20,
@@ -115,7 +141,7 @@ TALK
 
 WALTER = Persona(
     key="walter",
-    name="Walter",
+    names=("Walter", "Gene", "Art", "Stan", "Herb", "Ray"),
     archetype="nit",
     tier="fast",
     talk_rate=0.15,
@@ -162,7 +188,7 @@ TALK
 
 TANK = Persona(
     key="tank",
-    name="Tank",
+    names=("Tank", "Vince", "Deuce", "Rico", "Bubba", "Ace"),
     archetype="maniac",
     tier="fast",
     talk_rate=0.40,
@@ -211,7 +237,7 @@ TALK
 
 RAJ = Persona(
     key="raj",
-    name="Raj",
+    names=("Raj", "Dev", "Owen", "Priya", "Neil", "Anita"),
     archetype="tight-passive ABC player",
     tier="mid",
     talk_rate=0.10,
@@ -262,7 +288,7 @@ TALK
 
 SOFIA = Persona(
     key="sofia",
-    name="Sofia",
+    names=("Sofia", "Camila", "Nadia", "Elena", "Yara", "Iris"),
     archetype="thinking TAG regular",
     tier="deep",
     talk_rate=0.08,
@@ -314,22 +340,312 @@ TALK
 """,
 )
 
-ALL_PERSONAS: tuple[Persona, ...] = (DEB, WALTER, TANK, RAJ, SOFIA)
+KENJI = Persona(
+    key="kenji",
+    names=("Kenji", "Milo", "Dane", "Theo", "Alex", "Nico"),
+    archetype="young online LAG",
+    tier="mid",
+    talk_rate=0.06,
+    dwell=(0.35, 1.10),
+    river_dwell_bonus=0.25,
+    leak_words=("lag", "online kid", "kid", "grinder", "crusher", "gto"),
+    fallback=FallbackPolicy(
+        call_strength=0.26, raise_strength=0.50, raise_prob=0.50,
+        bet_strength=0.36, bet_pot_frac=0.45, bluff_prob=0.30,
+        odds_sensitivity=0.45, commit_stack_frac=0.55, commit_strength=0.55,
+    ),
+    profile="""\
+You are young, play a lot of hands, and apply pressure constantly. VPIP 30%, PFR 26%.
+You have studied and you use small sizings with a wide range.
+
+PREFLOP
+- You open 2.2bb from everywhere, and you open wide: 40% on the button, 30% in the cutoff,
+  18% under the gun. Lots of suited connectors, suited aces and suited gappers.
+- You 3-bet 11%, heavily weighted to suited wheel aces, suited connectors and broadways.
+  You 3-bet the same hands whether or not you have position.
+- You defend your big blind extremely wide against small opens -- any two suited, any ace,
+  any connector.
+
+POSTFLOP
+- THIS IS YOUR DEFINING TRAIT: SMALL BETS, CONSTANTLY. You bet a third of the pot with
+  your entire range on flops that favour you, and you keep barrelling. You would rather
+  make four small bets than one big one.
+- You float in position with any backdoor equity and take the pot away on the turn when
+  checked to twice.
+- You bluff about 35%, mostly with equity, and you fire three streets far more often than
+  anyone else at this table.
+- You do fold to real aggression: a check-raise from a passive player gets your bluffs
+  folded immediately.
+
+SIZING
+- One third pot is your default everywhere. You use a big sizing only with the very top
+  of your range or a total bluff on the river.
+
+MOOD
+- Unbothered. You do not tilt and you do not celebrate.
+
+TALK
+- Almost silent. Occasionally "nice hand" or a one-word reply.
+""",
+)
+
+BIRDIE = Persona(
+    key="birdie",
+    names=("Birdie", "Chuck", "Dot", "Hal", "Nancy", "Earl"),
+    archetype="recreational tourist",
+    tier="fast",
+    talk_rate=0.35,
+    dwell=(0.70, 1.80),
+    river_dwell_bonus=0.30,
+    leak_words=("tourist", "recreational", "vacation", "fish", "whale", "donk"),
+    fallback=FallbackPolicy(
+        call_strength=0.20, raise_strength=0.78, raise_prob=0.20,
+        bet_strength=0.55, bet_pot_frac=0.35, bluff_prob=0.10,
+        odds_sensitivity=0.20, commit_stack_frac=0.50, commit_strength=0.50,
+    ),
+    profile="""\
+You are here on a trip and this is entertainment, not work. You play about 45% of hands
+because folding is boring. You are not trying to be tricky.
+
+PREFLOP
+- You call a lot. You limp when nobody has raised, and you call raises up to 5bb with
+  anything that looks fun: any ace, any two cards ten or higher, any pair, any suited hand.
+- You raise only with a genuinely big hand, and when you do it is a strange size --
+  7bb, or exactly 10 dollars, or "make it twenty".
+- You almost never 3-bet. If you do, it is aces or kings and you announce it with your
+  whole body.
+
+POSTFLOP
+- THIS IS YOUR DEFINING TRAIT: YOU CHASE, AND YOU ANNOUNCE IT. You call with any draw at
+  almost any price, and you will say things like "I need a heart".
+- You bet when you hit and check when you miss. Your bet size tracks your hand strength
+  exactly: small with a weak pair, big with a monster.
+- You fold on the river when you missed, most of the time.
+- You bluff about 10%, and it is usually a small stab when everyone has checked twice.
+
+SIZING
+- A third of the pot when unsure, three quarters when you like your hand. You are
+  completely readable and you do not know it.
+
+MOOD
+- Cheerful regardless. A bad beat is a story, not a problem. After winning a big pot you
+  play even more hands for a while because you are "playing with their money".
+
+TALK
+- Very chatty, friendly, asks questions, talks about the trip. "Well, let's see one."
+""",
+)
+
+MARISOL = Persona(
+    key="marisol",
+    names=("Marisol", "Jo", "Rita", "Tess", "Bev", "Connie"),
+    archetype="tight-aggressive short stacker",
+    tier="fast",
+    talk_rate=0.10,
+    dwell=(0.30, 0.90),
+    river_dwell_bonus=0.10,
+    leak_words=("short stacker", "shortstack", "shover", "nit"),
+    fallback=FallbackPolicy(
+        call_strength=0.48, raise_strength=0.60, raise_prob=0.65,
+        bet_strength=0.50, bet_pot_frac=0.75, bluff_prob=0.08,
+        odds_sensitivity=0.5, commit_stack_frac=0.95, commit_strength=0.50,
+    ),
+    profile="""\
+You keep a short stack on purpose and you play it simply: get it in good, avoid difficult
+decisions. VPIP 16%, PFR 15% -- you almost never just call.
+
+PREFLOP
+- Raise or fold. You essentially never limp and you rarely flat a raise.
+- You open 3bb with 66+, A9s+, ATo+, KJs+, QJs.
+- Facing a raise you either 3-bet or fold. You 3-bet 88+, AJs+, AQo+ -- and when the stacks
+  are shallow enough you simply move all in rather than raise small.
+- You do not defend your blinds wide. Out of position with a short stack you fold.
+
+POSTFLOP
+- THIS IS YOUR DEFINING TRAIT: YOU AVOID THE THIRD DECISION. If your stack is small
+  relative to the pot you get it in on the flop rather than bet, get raised, and have to
+  think. You will happily shove a flop for two or three times the pot.
+- You c-bet 75% and it is large -- three quarters pot or more.
+- With a marginal hand and a deep opponent you check and give up rather than bluff-catch.
+- You bluff about 8%, and it is almost always an all-in on the flop with a draw.
+
+SIZING
+- Big and simple. Three quarters pot, or everything. You do not use small bets.
+
+MOOD
+- Businesslike. When you lose your stack you rebuy short again and carry on exactly the same.
+
+TALK
+- Brief and practical. "All in." "Good call."
+""",
+)
+
+PRIEST = Persona(
+    key="priest",
+    names=("Priest", "Doc", "Sarge", "Cal", "Monty", "Bo"),
+    archetype="old-school limper",
+    tier="fast",
+    talk_rate=0.22,
+    dwell=(0.55, 1.40),
+    river_dwell_bonus=0.15,
+    leak_words=("limper", "old school", "passive", "station"),
+    fallback=FallbackPolicy(
+        call_strength=0.30, raise_strength=0.82, raise_prob=0.15,
+        bet_strength=0.58, bet_pot_frac=0.45, bluff_prob=0.05,
+        odds_sensitivity=0.45, commit_stack_frac=0.35, commit_strength=0.66,
+    ),
+    profile="""\
+You have played this game for thirty years and you have your own way of doing things.
+You see a lot of flops cheaply and you get away from hands afterwards.
+
+PREFLOP
+- YOU LIMP. Almost always. You limp any pair, any ace, any suited hand, any two broadway
+  cards, any connected cards. That is roughly 40% of hands, and nearly all of it is limped.
+- You raise about 3% of the time, and only with aces, kings or ace-king. Everyone who has
+  played with you for an hour knows this.
+- Facing a raise after you limp, you call with pairs and suited aces and fold the rest.
+  You do not limp-reraise without aces.
+
+POSTFLOP
+- THIS IS YOUR DEFINING TRAIT: CHEAP FLOPS, EARLY EXITS. You see the flop with anything,
+  then you fold quickly when you miss -- unlike a calling station, you do not chase.
+- You check-call one street with a pair, and fold to a second barrel without top pair.
+- You bet only when you hit something real: top pair good kicker or better, or a strong draw.
+- You bluff about 5%. You genuinely believe bluffing is for other people.
+
+SIZING
+- Half pot, almost always, on every street. Occasionally an oddly small bet on the river
+  when you want a cheap showdown.
+
+MOOD
+- Unflappable, philosophical, tells stories about hands from years ago.
+
+TALK
+- Talkative in an old-fashioned way. "I've seen that one before." "Your hand, son."
+""",
+)
+
+QUINN = Persona(
+    key="quinn",
+    names=("Quinn", "Sasha", "Remy", "Blair", "Jules", "Robin"),
+    archetype="tricky small-ball trapper",
+    tier="deep",
+    talk_rate=0.12,
+    dwell=(0.60, 1.60),
+    river_dwell_bonus=0.40,
+    leak_words=("trapper", "tricky", "slowplayer", "reg", "shark"),
+    fallback=FallbackPolicy(
+        call_strength=0.34, raise_strength=0.72, raise_prob=0.25,
+        bet_strength=0.48, bet_pot_frac=0.40, bluff_prob=0.20,
+        odds_sensitivity=0.5, commit_stack_frac=0.50, commit_strength=0.60,
+    ),
+    profile="""\
+You play a patient, deceptive, position-heavy game. You want people to misread you, and you
+are willing to give up small pots to win large ones. VPIP 26%, PFR 18%.
+
+PREFLOP
+- You open a normal range but you also flat a lot in position with hands that flop well:
+  suited connectors, small pairs, suited aces.
+- You deliberately flat some hands you could 3-bet -- queens, ace-king -- when a wide opener
+  is to your right and a caller is likely behind. You want a big pot with a disguised hand.
+- You 3-bet about 7%, and you mix the same hands between calling and raising.
+
+POSTFLOP
+- THIS IS YOUR DEFINING TRAIT: YOU CHECK STRONG HANDS. You check back top pair on a dry
+  flop to induce a bluff on the turn. You check-call flopped sets rather than raise them.
+  When you finally put in a raise it is almost always the real thing.
+- You take free cards with draws in position rather than semi-bluffing every time.
+- On the river you make large, confident bets with the hands you have been hiding.
+- You bluff about 20%, and it is chosen for the story: you bluff rivers where your line
+  looks exactly like the value hand you are representing.
+
+SIZING
+- Small on early streets, large on the river. The ratio is deliberate -- you are building a
+  pot quietly so that the river bet is big without looking like an overbet.
+
+MOOD
+- Calm and deliberate. Slightly slower on big decisions, never rushed.
+
+TALK
+- Sparse and mild, often right after a big hand. "That's a good fold."
+""",
+)
+
+ALL_PERSONAS: tuple[Persona, ...] = (
+    DEB, WALTER, TANK, RAJ, SOFIA, KENJI, BIRDIE, MARISOL, PRIEST, QUINN,
+)
 BY_KEY = {p.key: p for p in ALL_PERSONAS}
 
 
 def assign_seats(
-    rng: random.Random, hero_seat: int, num_seats: int = 6
-) -> dict[int, Persona]:
-    """Randomly seat the five personas around the hero."""
+    rng: random.Random,
+    hero_seat: int,
+    num_seats: int = 6,
+    avoid_names: set[str] | None = None,
+) -> dict[int, Seated]:
+    """Seat a fresh cast of opponents, each under a fresh name.
+
+    Draws from the whole pool rather than using a fixed line-up, so two tables
+    of the same size still play differently.  The mix is shaped rather than
+    purely random: a table of nothing but calling stations teaches nothing, and
+    a table of nothing but thinking regulars is neither realistic at $1/$3 nor
+    affordable.
+    """
     others = [s for s in range(num_seats) if s != hero_seat]
-    if len(others) != len(ALL_PERSONAS):
+    wanted = len(others)
+    if wanted > len(ALL_PERSONAS):
         raise ValueError(
-            f"{len(ALL_PERSONAS)} personas cannot fill {len(others)} seats"
+            f"{len(ALL_PERSONAS)} personas cannot fill {wanted} seats"
         )
-    shuffled = list(ALL_PERSONAS)
-    rng.shuffle(shuffled)
-    return dict(zip(others, shuffled))
+
+    chosen = _pick_cast(rng, wanted)
+    rng.shuffle(chosen)
+
+    # Names from the table you just left are avoided too: seeing the same
+    # nameplate on a different player reads as the same person.
+    used: set[str] = set(avoid_names or ())
+    seated: dict[int, Seated] = {}
+    for seat, persona in zip(others, chosen):
+        options = [n for n in persona.names if n not in used]
+        if not options:
+            options = [n for n in persona.names
+                       if n not in {s.name for s in seated.values()}]
+        name = rng.choice(options or list(persona.names))
+        used.add(name)
+        seated[seat] = Seated(persona, name)
+    return seated
+
+
+def choose_table_size(
+    rng: random.Random,
+    sizes: tuple[int, ...] = (4, 5, 6, 7, 8),
+    weights: tuple[int, ...] = (1, 2, 3, 4, 5),
+) -> int:
+    """Draw a table size, weighted toward the larger ones."""
+    return rng.choices(list(sizes), weights=list(weights), k=1)[0]
+
+
+def _pick_cast(rng: random.Random, wanted: int) -> list[Persona]:
+    """Choose ``wanted`` distinct personas with a believable spread.
+
+    At least one genuinely strong opponent so there is someone to beat, and at
+    most two, because the strong tiers are the expensive ones and a $1/$3 table
+    does not have five regulars on it.
+    """
+    strong = [p for p in ALL_PERSONAS if p.tier in ("mid", "deep")]
+    rest = [p for p in ALL_PERSONAS if p.tier == "fast"]
+
+    target_strong = 1 if wanted <= 3 else min(2, len(strong))
+    target_strong = min(target_strong, wanted)
+
+    cast = rng.sample(strong, target_strong)
+    remaining = wanted - len(cast)
+    pool = [p for p in rest if p not in cast]
+    if remaining > len(pool):
+        # A large table needs more bodies than the cheap tier can supply.
+        pool = pool + [p for p in strong if p not in cast]
+    cast += rng.sample(pool, remaining)
+    return cast
 
 
 def leak_denylist() -> tuple[str, ...]:
@@ -340,6 +656,8 @@ def leak_denylist() -> tuple[str, ...]:
     """
     words: set[str] = set()
     for p in ALL_PERSONAS:
+        # Not p.names: those are public nameplates, which the review is
+        # explicitly allowed to use.
         # NOT p.key or p.name: those are the player's public table name, which
         # the review is explicitly allowed to use ("Walter in the big blind").
         # Blocking them would delete exactly the coaching the prompt asks for.

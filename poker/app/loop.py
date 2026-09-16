@@ -21,7 +21,9 @@ from rich.live import Live
 from poker.agents.client import AgentClient
 from poker.agents.decide import Decision, OpponentAgent, Source, forced_action
 from poker.agents.fallback import decision_rng, local_decision
-from poker.agents.personas import assign_seats, leak_denylist
+from poker.agents.personas import (
+    assign_seats, choose_table_size, leak_denylist,
+)
 from poker.app.commands import QUIT, TOGGLE_REVIEW
 from poker.app.input import ActionPrompt
 from poker.app.review import ReviewCoach
@@ -49,42 +51,36 @@ class App:
         self._started = time.monotonic()
         self.quit = False
 
-        game = GameConfig(
-            small_blind=config.small_blind,
-            big_blind=config.big_blind,
-            num_seats=config.num_seats,
-            buy_in=config.buy_in,
-            rebuy_threshold=config.rebuy_threshold,
-            topup_to=config.buy_in,
-        )
         self.store = SessionStore(config)
         resumed = self.store.load()
 
         self.rng = random.Random(resumed.session_seed if resumed else None)
-        self.personas = assign_seats(self.rng, config.hero_seat, config.num_seats)
-        names = [HERO_NAME] * config.num_seats
-        for seat, persona in self.personas.items():
-            names[seat] = persona.name
-
-        self.table = Table(
-            game, names,
-            human_seat=config.hero_seat,
-            session_seed=resumed.session_seed if resumed else None,
-            stacks=resumed.stacks if resumed else None,
-            button=resumed.button if resumed else None,
-            hand_number=resumed.hand_number if resumed else 0,
-        )
-        if resumed:
-            for seat, bought in resumed.bought_in.items():
-                self.table.seats[seat].total_bought_in = bought
-                self.table.seats[seat].hands_played = resumed.hands_played
-
         self.client: AgentClient | None = None if config.offline else AgentClient()
         self.denylist = tuple(w.lower() for w in leak_denylist())
-        self.agents = {
-            seat: OpponentAgent(persona, seat, self.client, config, self.denylist)
-            for seat, persona in self.personas.items()
-        }
+
+        # The hero's bankroll follows them between tables; the opponents do not.
+        self.hero_stack = config.buy_in
+        self.hero_bought_in = config.buy_in
+        self.hands_played = 0
+        self.hand_number = 0
+        self.table_number = 0
+        self.hands_at_table = 0
+
+        if resumed:
+            hero = config.hero_seat
+            if hero < len(resumed.stacks):
+                self.hero_stack = resumed.stacks[hero]
+            self.hero_bought_in = resumed.bought_in.get(hero, config.buy_in)
+            self.hands_played = resumed.hands_played
+            self.hand_number = resumed.hand_number
+            self.table_number = getattr(resumed, "table_number", 0)
+
+        self.seat_size = config.num_seats
+        self.personas: dict = {}
+        self.table: Table
+        self.agents: dict = {}
+        self._seat_table(config.num_seats)
+
         self.coach = ReviewCoach(self.client, config, self.denylist)
         self.keys = KeyReader()
         self.prompt = ActionPrompt(self.keys, self.publish)
@@ -93,6 +89,69 @@ class App:
         self._street: Street | None = None
         self.offline_reason = ""
         """Why live play is unavailable, if it is.  Shown in the banner and again on exit."""
+
+    # ------------------------------------------------------------ the table
+
+    def _seat_table(self, num_seats: int) -> None:
+        """Sit down at a new table: fresh opponents, fresh names, same bankroll."""
+        self.seat_size = num_seats
+        self.table_number += 1
+        self.hands_at_table = 0
+
+        game = GameConfig(
+            small_blind=self.cfg.small_blind,
+            big_blind=self.cfg.big_blind,
+            num_seats=num_seats,
+            buy_in=self.cfg.buy_in,
+            rebuy_threshold=self.cfg.rebuy_threshold,
+            topup_to=self.cfg.buy_in,
+        )
+        hero = self.cfg.hero_seat
+        previous = {s.name for s in self.personas.values()}
+        self.personas = assign_seats(self.rng, hero, num_seats,
+                                     avoid_names=previous)
+
+        names = [HERO_NAME] * num_seats
+        for seat, seated in self.personas.items():
+            names[seat] = seated.name
+
+        stacks = [self.cfg.buy_in] * num_seats
+        stacks[hero] = max(self.hero_stack, self.cfg.big_blind)
+
+        self.table = Table(
+            game, names,
+            human_seat=hero,
+            session_seed=self.rng.getrandbits(64),
+            stacks=stacks,
+            hand_number=self.hand_number,
+        )
+        # Carry the hero's cost basis so session P/L stays continuous.
+        self.table.seats[hero].total_bought_in = self.hero_bought_in
+        self.table.seats[hero].hands_played = self.hands_played
+
+        self.agents = {
+            seat: OpponentAgent(seated, seat, self.client, self.cfg, self.denylist)
+            for seat, seated in self.personas.items()
+        }
+
+    def _remember_hero(self) -> None:
+        hero = self.table.human
+        self.hero_stack = hero.stack
+        self.hero_bought_in = hero.total_bought_in
+        self.hands_played = hero.hands_played
+        self.hand_number = self.table.hand_number
+
+    async def change_table(self, reason: str = "") -> None:
+        """Move to a new table, keeping the bankroll and nothing else."""
+        self._remember_hero()
+        size = choose_table_size(self.rng, self.cfg.table_sizes,
+                                 self.cfg.table_size_weights)
+        self._seat_table(size)
+        self.publish(seats=(), banner=self._view.banner)
+        note = reason or "New table."
+        self._note(f"{note}  Seat {self.cfg.hero_seat} at a {size}-handed table.",
+                   "subtle")
+        await self._pause(self.cfg.street_pause)
 
     # ------------------------------------------------------------ publishing
 
@@ -156,6 +215,14 @@ class App:
                         await self.show_review()
                         await self.between_hands()
                         await self.wait_for_next_hand()
+                        if self.quit:
+                            break
+                        if (self.cfg.hands_per_table
+                                and self.hands_at_table >= self.cfg.hands_per_table):
+                            await self.change_table(
+                                f"{self.hands_at_table} hands here \u2014 "
+                                "the room is moving you."
+                            )
                         if self.cfg.demo_hands and played >= self.cfg.demo_hands:
                             break
                 finally:
@@ -370,6 +437,13 @@ class App:
         if review is not None:
             self.publish(review=review)
 
+    def _table_label(self) -> str:
+        left = ""
+        if self.cfg.hands_per_table:
+            left = f", {self.cfg.hands_per_table - self.hands_at_table} until the next"
+        return (f"table {self.table_number} \u00b7 {self.seat_size}-handed "
+                f"\u00b7 {self.hands_at_table} hands here{left}")
+
     def _hand_summary(self) -> str:
         record = getattr(self, "record", None)
         if record is None or record.result is None:
@@ -394,11 +468,14 @@ class App:
             return
 
         summary = self._hand_summary()
-        hint = ("enter: next   \u00b7   r: replay this hand   \u00b7   "
-                "v: reviews   \u00b7   q: quit")
+        hint = ("enter: next   \u00b7   r: replay   \u00b7   t: new table   "
+                "\u00b7   v: reviews   \u00b7   q: quit")
         while True:
             self.publish(
-                action_bar=ActionBar(active=False, message=summary),
+                action_bar=ActionBar(
+                    active=False,
+                    message=f"{summary}   \u00b7   {self._table_label()}",
+                ),
                 input_line=InputLine(active=True, hint=hint),
             )
             key = await self.keys.key()
@@ -414,6 +491,11 @@ class App:
             if lowered == "r":
                 await self._replay_last_hand()
                 continue
+            if lowered == "t":
+                await self.change_table("You asked for a new table.")
+                self.publish(review=ReviewView(), action_bar=ActionBar(),
+                             input_line=InputLine())
+                return
             if key in (K.KEY_ENTER, " "):
                 self.publish(review=ReviewView(), action_bar=ActionBar(),
                              input_line=InputLine())
@@ -421,7 +503,9 @@ class App:
 
     async def between_hands(self) -> None:
         self.store.append_hand(self.record)
-        self.store.save(self.table)
+        self._remember_hero()
+        self.hands_at_table += 1
+        self.store.save(self.table, table_number=self.table_number)
         hero = self.table.human
         if hero.stack < self.cfg.big_blind * 2:
             self.table.rebuy(self.cfg.hero_seat)

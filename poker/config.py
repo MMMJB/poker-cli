@@ -95,6 +95,15 @@ class Config:
     big_blind: int = 3
     buy_in: int = 300
     num_seats: int = 6
+    """Seats at the opening table.  Later tables are drawn from the range below."""
+
+    table_sizes: tuple[int, ...] = (4, 5, 6, 7, 8)
+    table_size_weights: tuple[int, ...] = (1, 2, 3, 4, 5)
+    """Weighted toward the bigger tables, which is how a real room looks:
+    short-handed games exist but full ones are the norm.  Mean is about 6.7."""
+
+    hands_per_table: int = 100
+    """Move to a new table after this many hands.  0 disables the automatic move."""
     hero_seat: int = 0
     rebuy_threshold: int = 60
     auto_rebuy_opponents: bool = True

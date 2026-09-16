@@ -8,6 +8,8 @@ from __future__ import annotations
 
 # 6-max position names by offset from the button.
 _POSITION_NAMES = {
+    8: ("BTN", "SB", "BB", "UTG", "UTG1", "MP", "HJ", "CO"),
+    7: ("BTN", "SB", "BB", "UTG", "MP", "HJ", "CO"),
     6: ("BTN", "SB", "BB", "UTG", "HJ", "CO"),
     5: ("BTN", "SB", "BB", "UTG", "CO"),
     4: ("BTN", "SB", "BB", "CO"),

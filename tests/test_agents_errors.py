@@ -50,7 +50,7 @@ def test_a_billing_failure_degrades_the_seat_with_its_own_reason() -> None:
     import anthropic
 
     from poker.agents.decide import OpponentAgent
-    from poker.agents.personas import BY_KEY
+    from poker.agents.personas import BY_KEY, Seated
     from poker.config import CFG
 
     import httpx2
@@ -69,7 +69,7 @@ def test_a_billing_failure_degrades_the_seat_with_its_own_reason() -> None:
             raise billing_error()
 
     events: list[tuple] = []
-    agent = OpponentAgent(BY_KEY["walter"], 1, Boom(), CFG, (),
+    agent = OpponentAgent(Seated.of(BY_KEY["walter"]), 1, Boom(), CFG, (),
                           on_event=lambda *a: events.append(a))
     result, note = asyncio.run(agent._request("state", "fast", False))
     assert result is None

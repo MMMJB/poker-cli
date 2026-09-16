@@ -92,9 +92,12 @@ def test_a_session_resumes_from_disk(tmp_path: Path) -> None:
     assert second.table.hand_number == 6, "should continue, not restart"
     # Only one session directory: the second run continued the first.
     assert len(list((tmp_path / "sessions").iterdir())) == 1
-    # A rebuy can only ever add to the cost basis, never reduce it.
-    for later, earlier in zip(second.table.seats, first.table.seats):
-        assert later.total_bought_in >= earlier.total_bought_in
+    # Only the hero's accounting is comparable across runs: the opponents are
+    # re-cast when you sit down, so seat 2 is not the same person twice.
+    hero_before = first.table.human
+    hero_after = second.table.human
+    assert hero_after.total_bought_in >= hero_before.total_bought_in
+    assert hero_after.profit == hero_after.stack - hero_after.total_bought_in
 
 
 def test_no_hand_log_leaks_a_persona_into_public_events(tmp_path: Path) -> None:

@@ -88,6 +88,8 @@ Without installing, `.venv/bin/python -m poker` does the same thing.
 | `--offline` | No API calls. Deterministic local opponents. |
 | `--no-review` | Turn off the post-hand review — by far the costliest call per hand. |
 | `--demo N` | Autoplay N hands with no keyboard — how the app is smoke-tested. |
+| `--seats N` | Seats at the opening table (4-8). |
+| `--hands-per-table N` | Move tables after N hands; `0` stays put. |
 | `--slow` / `--pace N` | Slow the action down (`--pace 2` = half speed, `0.5` = double). |
 | `--fast` | Drop the pacing entirely. |
 | `--debug` | Show latency, token, cache-hit and cost instrumentation. |
@@ -130,8 +132,8 @@ The board is centred in the terminal. Needs at least 80×24; it uses a roomier l
 who are not splitting anything. Badges say `MAIN` and `SIDE` in that case, so it doesn't read
 as a chop, and the log prints the pot breakdown.
 
-**Between hands**, nothing is dealt until you ask for it — `enter` for the next hand, `v` to
-toggle reviews, `q` to quit. The review, if there is one, stays on screen while you decide.
+**Between hands**, nothing is dealt until you ask for it — `enter` for the next hand, `r` to
+replay it, `t` for a new table, `v` to toggle reviews, `q` to quit. The review, if there is one, stays on screen while you decide.
 
 **Pacing.** Each opponent holds the screen for a moment before acting and again after, so a
 hand reads as a sequence of decisions rather than a blur. Offline play stretches the
@@ -140,10 +142,35 @@ that only ever filled the think-time floor — the fixed beats like the showdown
 tuned for how long a human needs to read them and don't depend on where the decision came
 from. Roughly 36s a hand offline at the default, 22s at `--pace 0.6`, 62s at `--slow`.
 
+## Tables
+
+Tables are **4 to 8 handed**, weighted toward the bigger ones — mean about 6.7, which is how a
+real room looks: short games exist, full ones are the norm. You move to a new table every
+**100 hands** by default, or whenever you press `t` between hands.
+
+A move brings an entirely new cast: different archetypes, different names, fresh stacks. Your
+own chips and P/L come with you, so the session reads as one continuous bankroll.
+
+```bash
+poker --seats 8              # open at an eight-handed table
+poker --hands-per-table 25   # move more often
+poker --hands-per-table 0    # stay put
+```
+
+Each archetype has a pool of nameplates and draws a fresh one per table, and names from the
+table you just left are avoided. The same archetype under a new name is deliberate: the
+exercise is reading how someone plays, not recognising who they were an hour ago.
+
 ## The opponents
 
-Five archetypes you actually meet in a $1/$3 game. They are assigned to seats randomly each
-session and are **never labelled in the UI**. The contrast is the point — against the same
+Ten archetypes you actually meet in a $1/$3 game — a calling station, a nit, a maniac, an ABC
+reg, a thinking TAG, a young online LAG, a recreational tourist, a short-stacker, an
+old-school limper, and a tricky trapper. Each table draws from the pool and is **never
+labelled in the UI**.
+
+The mix is shaped rather than purely random: at least one opponent genuinely worth beating so
+there is something to learn, and never more than two, because a $1/$3 table does not have five
+regulars on it and the strong tiers are the expensive ones. The contrast is the point — against the same
 flop c-bet one calls, one folds, one raises, one folds unless it has it, and one thinks about
 what your betting says.
 

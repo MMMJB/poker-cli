@@ -134,7 +134,9 @@ def render_frame(view: TableView, layout: Layout, tick: float) -> Canvas:
 
 def _draw_header(canvas: Canvas, view: TableView, layout: Layout) -> None:
     y = layout.header_y
-    left = f" {money(view.small_blind)}/{money(view.big_blind)} NL Hold'em · 6-max"
+    seats = len(view.seats) or 6
+    left = (f" {money(view.small_blind)}/{money(view.big_blind)} NL Hold'em "
+            f"· {seats}-max")
     canvas.put(2, y, left, "title")
 
     if view.session_label:

@@ -69,10 +69,14 @@ def test_context_contains_no_archetype_or_profile() -> None:
 
 
 def test_the_denylist_permits_naming_a_player() -> None:
-    """The prompt invites 'Walter in the big blind' -- the scrubber must allow it."""
+    """The prompt invites 'Walter in the big blind' -- the scrubber must allow it.
+
+    Every nameplate an archetype can wear has to pass, not just the first.
+    """
     for persona in ALL_PERSONAS:
-        line = f"{persona.name} in the big blind called every street."
-        assert _scrub(line, DENY) == line, f"{persona.name} was wrongly scrubbed"
+        for name in persona.names:
+            line = f"{name} in the big blind called every street."
+            assert _scrub(line, DENY) == line, f"{name} was wrongly scrubbed"
 
 
 def test_context_contains_no_unshown_hole_cards() -> None:

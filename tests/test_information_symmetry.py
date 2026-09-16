@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 
-from poker.agents.personas import ALL_PERSONAS
+from poker.agents.personas import ALL_PERSONAS, Seated
 from poker.agents.prompts import build_system_prompt, render_state
 from poker.engine.actions import Action
 from poker.engine.cards import card_str
@@ -135,8 +135,8 @@ def test_system_prompt_is_byte_stable_and_carries_no_hand_state() -> None:
     is contain any value from an actual hand.
     """
     for persona in ALL_PERSONAS:
-        text = build_system_prompt(persona)
-        assert text == build_system_prompt(persona), "not byte-stable"
+        text = build_system_prompt(Seated.of(persona))
+        assert text == build_system_prompt(Seated.of(persona)), "not byte-stable"
         assert "HAND #" not in text
         assert "Pot: $" not in text
         assert "Board: " not in text
@@ -146,7 +146,7 @@ def test_system_prompt_is_byte_stable_and_carries_no_hand_state() -> None:
 def test_no_persona_leaks_into_another_personas_prompt() -> None:
     """Each agent knows only its own character."""
     for persona in ALL_PERSONAS:
-        text = build_system_prompt(persona)
+        text = build_system_prompt(Seated.of(persona))
         for other in ALL_PERSONAS:
             if other.key == persona.key:
                 continue

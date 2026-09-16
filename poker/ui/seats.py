@@ -11,8 +11,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 # Clockwise from the hero.  In poker the next player to act is to your left,
-# which on screen means up the left-hand side.
-SEAT_RING = ("hero", "ll", "ul", "top", "ur", "lr")
+# which on screen means up the left-hand side and back down the right.
+#
+# One ring per table size rather than points on an ellipse: seat boxes are
+# twenty columns wide, so a computed ring overlaps at eight seats and the
+# arrangement has to be chosen, not derived.
+RINGS: dict[int, tuple[str, ...]] = {
+    2: ("hero", "top"),
+    3: ("hero", "ul", "ur"),
+    4: ("hero", "ll", "top", "lr"),
+    5: ("hero", "ll", "tl", "tr", "lr"),
+    6: ("hero", "ll", "ul", "top", "ur", "lr"),
+    7: ("hero", "ll", "ul", "tl", "tr", "ur", "lr"),
+    8: ("hero", "ll", "ul", "t1", "t2", "t3", "ur", "lr"),
+}
+SEAT_RING = RINGS[6]
+
+MAX_SEATS = max(RINGS)
+MIN_SEATS = min(RINGS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,9 +61,15 @@ class Layout:
     log_lines: int
     sep_rows: tuple[int, ...]
 
+    def ring(self, num_seats: int) -> tuple[str, ...]:
+        try:
+            return RINGS[num_seats]
+        except KeyError:  # pragma: no cover - guarded at config time
+            raise ValueError(f"unsupported table size: {num_seats}") from None
+
     def slot_for(self, seat: int, hero_seat: int, num_seats: int) -> SeatSlot:
         offset = (seat - hero_seat) % num_seats
-        return self.slots[SEAT_RING[offset]]
+        return self.slots[self.ring(num_seats)[offset]]
 
 
 FULL = Layout(
@@ -59,6 +81,11 @@ FULL = Layout(
     seat_h=4,
     slots={
         "top": SeatSlot(40, 3, 50, 9, "center"),
+        "tl": SeatSlot(26, 3, 36, 9, "center"),
+        "tr": SeatSlot(54, 3, 64, 9, "center"),
+        "t1": SeatSlot(16, 3, 34, 9, "center"),
+        "t2": SeatSlot(40, 3, 50, 9, "center"),
+        "t3": SeatSlot(64, 3, 66, 9, "center"),
         "ul": SeatSlot(2, 8, 29, 10, "left"),
         "ur": SeatSlot(78, 8, 70, 10, "right"),
         "ll": SeatSlot(2, 16, 29, 16, "left"),
@@ -87,6 +114,11 @@ COMPACT = Layout(
     seat_h=2,
     slots={
         "top": SeatSlot(31, 3, 40, 7, "center"),
+        "tl": SeatSlot(21, 3, 33, 7, "center"),
+        "tr": SeatSlot(41, 3, 47, 7, "center"),
+        "t1": SeatSlot(2, 3, 30, 7, "center"),
+        "t2": SeatSlot(31, 3, 40, 7, "center"),
+        "t3": SeatSlot(60, 3, 50, 7, "center"),
         "ul": SeatSlot(2, 7, 24, 7, "left"),
         "ur": SeatSlot(59, 7, 55, 7, "right"),
         "ll": SeatSlot(2, 12, 24, 11, "left"),
