@@ -10,6 +10,7 @@ import sys
 from rich.console import Console
 
 from poker.config import CFG, Config
+from poker.env import has_credentials, load_env
 from poker.ui.theme import THEME
 
 
@@ -63,22 +64,24 @@ def build_config(args: argparse.Namespace) -> Config:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Before anything reads the environment: a local .env is how the key is
+    # kept off the command line and out of the repo.
+    load_env()
+
     args = parse_args(argv)
     config = build_config(args)
     console = Console(theme=THEME)
 
-    if not config.offline:
-        import os
-
-        if not any(os.environ.get(k) for k in
-                   ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")):
-            console.print(
-                "[prompt.error]No Anthropic credentials found.[/]\n"
-                "Set [action.key]ANTHROPIC_API_KEY[/] and try again, or run\n"
-                "  [action.key]python -m poker --offline[/]\n"
-                "to play against the local opponents at no cost."
-            )
-            return 2
+    if not config.offline and not has_credentials():
+        console.print(
+            "[prompt.error]No Anthropic credentials found.[/]\n"
+            "Put [action.key]ANTHROPIC_API_KEY=sk-ant-...[/] in a "
+            "[action.key].env[/] file next to the project, export it in your "
+            "shell, or run\n"
+            "  [action.key]poker --offline[/]\n"
+            "to play against the local opponents at no cost."
+        )
+        return 2
 
     from poker.app.loop import App
 

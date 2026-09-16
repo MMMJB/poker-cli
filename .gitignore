@@ -4,3 +4,11 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 .DS_Store
+
+# Secrets. Never commit these -- a key in git history is very hard to undo,
+# and this repo has a remote.
+.env
+.env.*
+!.env.example
+*.key
+secrets.*

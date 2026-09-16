@@ -11,6 +11,7 @@ key is ever read or stored by this module.
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -117,6 +118,11 @@ class AgentClient:
                 return f"this key may not use {model}"
             except anthropic.RateLimitError:
                 continue  # transient, not a configuration problem
+            except anthropic.BadRequestError as exc:
+                # A 400 here is usually an account state rather than a bad
+                # request -- an unfunded balance is the common one -- so pass
+                # the server's own wording through instead of "API error 400".
+                return f"{model}: {_message_of(exc)}"
             except anthropic.APIStatusError as exc:
                 return f"{model}: API error {exc.status_code}"
             except anthropic.APIConnectionError:
@@ -303,6 +309,45 @@ def _first_text(msg) -> str:
         if block.type == "text":
             return block.text
     raise ValueError("response contained no text block")
+
+
+def is_billing_error(exc: Exception) -> bool:
+    """A 400 that means "this account cannot spend", not "this request is wrong".
+
+    It needs distinguishing because the two demand opposite responses: a
+    malformed request should degrade that seat permanently, while an unfunded
+    account should stop the whole session with an explanation.
+    """
+    text = _message_of(exc).lower()
+    return any(s in text for s in ("credit balance", "billing", "quota",
+                                   "insufficient funds", "purchase"))
+
+
+def _message_of(exc: Exception) -> str:
+    """The server's own sentence, without the JSON envelope around it.
+
+    ``exc.message`` is the whole ``Error code: 400 - {...}`` dump, which is
+    unreadable in a one-line banner.
+    """
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            message = error.get("message")
+            if isinstance(message, str) and message:
+                return message
+        message = body.get("message")
+        if isinstance(message, str) and message:
+            return message
+
+    message = getattr(exc, "message", None)
+    if isinstance(message, str) and message:
+        # Fall back to digging the message out of the dumped envelope.
+        match = re.search(r"'message':\s*'([^']+)'", message)
+        if match:
+            return match.group(1)
+        return message
+    return str(exc)
 
 
 def _served_by(msg, requested: str) -> str:

@@ -59,10 +59,16 @@ and leaves your checkout and hand histories alone.
 
 ## Running it
 
+Put your key in a `.env` beside the project:
+
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+cp .env.example .env    # then edit it
 poker
 ```
+
+`.env` is gitignored and never committed. Anything already exported in your shell wins over
+it, so `ANTHROPIC_API_KEY=... poker` still overrides for a single run. A `.env` in
+`~/.poker-trainer/` works too, which is handy when the checkout lives somewhere transient.
 
 No key, or just want to see it work? The opponents fall back to local policies and the whole
 game runs at **zero cost**:

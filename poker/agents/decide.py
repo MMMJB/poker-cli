@@ -20,7 +20,9 @@ from enum import Enum
 
 import anthropic
 
-from poker.agents.client import AgentClient, ModelRefusal, TruncatedOutput
+from poker.agents.client import (
+    AgentClient, ModelRefusal, TruncatedOutput, _message_of, is_billing_error,
+)
 from poker.agents.fallback import decision_rng, local_decision, local_talk
 from poker.agents.personas import Persona
 from poker.agents.prompts import build_reask, build_system_prompt, render_state
@@ -281,9 +283,13 @@ class OpponentAgent:
             return None, "rate limited"
 
         except anthropic.BadRequestError as exc:
-            # Our bug, not a transient fault.  Never retry: stop this seat from
-            # rediscovering it three hundred more times.
+            # Never retry either way, but say which it is: a malformed request
+            # is our bug, an unfunded account is not and the whole session is
+            # about to fall back to local play for a reason worth surfacing.
             self.degraded = True
+            if is_billing_error(exc):
+                self._emit("billing", _message_of(exc))
+                return None, "account cannot spend (check billing)"
             self._emit("bad_request", str(exc))
             return None, f"bad request: {exc}"
 

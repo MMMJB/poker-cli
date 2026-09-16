@@ -125,7 +125,8 @@ class App:
             error = await self.client.preflight(models)
             if error:
                 banner = "OFFLINE"
-                self._note(f"API unavailable ({error}) -- playing offline.", "prompt.error")
+                self._note(f"API unavailable -- {error}", "prompt.error")
+                self._note("Playing against the local opponents instead.", "subtle")
                 for agent in self.agents.values():
                     agent.degraded = True
                 self.coach.degraded = True
