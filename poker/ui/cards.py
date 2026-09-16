@@ -73,9 +73,10 @@ def draw_card_slot(canvas: Canvas, x: int, y: int) -> None:
         canvas.put(x, y + row, SLOT_FILL * CARD_W, "card.slot")
 
 
-def draw_compact_card(canvas: Canvas, x: int, y: int, card: Card) -> None:
-    canvas.put(x, y, " " * COMPACT_W, "card.blank")
-    canvas.put(x, y, card_label(card), card_style(card))
+def draw_compact_card(canvas: Canvas, x: int, y: int, card: Card,
+                      dim: bool = False) -> None:
+    canvas.put(x, y, " " * COMPACT_W, "card.slot" if dim else "card.blank")
+    canvas.put(x, y, card_label(card), "card.slot" if dim else card_style(card))
 
 
 def draw_compact_back(canvas: Canvas, x: int, y: int) -> None:
@@ -95,6 +96,12 @@ def draw_hand_compact(
 
     Returns the width drawn.
     """
+    if folded and cards and face_up:
+        # Entitled to see them -- your own mucked hand, or a replay of your
+        # history. Dimmed, so a folded seat still reads as folded.
+        draw_compact_card(canvas, x, y, cards[0], dim=True)
+        draw_compact_card(canvas, x + 4, y, cards[1], dim=True)
+        return 7
     if folded:
         canvas.put(x, y, "--  --", "seat.folded")
         return 6

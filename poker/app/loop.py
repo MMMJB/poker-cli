@@ -373,7 +373,8 @@ class App:
             return
 
         summary = self._hand_summary()
-        hint = "enter: next hand   \u00b7   v: reviews on/off   \u00b7   q: quit"
+        hint = ("enter: next   \u00b7   r: replay this hand   \u00b7   "
+                "v: reviews   \u00b7   q: quit")
         while True:
             self.publish(
                 action_bar=ActionBar(active=False, message=summary),
@@ -389,6 +390,9 @@ class App:
             if lowered == "v":
                 self._toggle_review()
                 continue
+            if lowered == "r":
+                await self._replay_last_hand()
+                continue
             if key in (K.KEY_ENTER, " "):
                 self.publish(review=ReviewView(), action_bar=ActionBar(),
                              input_line=InputLine())
@@ -401,6 +405,36 @@ class App:
         if hero.stack < self.cfg.big_blind * 2:
             self.table.rebuy(self.cfg.hero_seat)
             self._note("You reloaded to " + money(self.cfg.buy_in), "subtle")
+
+    async def _replay_last_hand(self) -> None:
+        """Step back through the hand just played, without leaving the game.
+
+        It is read from disk like any other stored hand, so this is the same
+        code path as ``poker hand N`` -- and it proves the hand was written.
+        """
+        from poker.app import replay
+        from poker.app.replay_view import ReplayViewer
+
+        record = getattr(self, "record", None)
+        if record is None:
+            return
+
+        stored = replay.find(self.cfg, record.hand_id)
+        if stored is None:
+            self._note("That hand is not on disk yet.", "prompt.error")
+            return
+
+        viewer = ReplayViewer(stored, self.cfg, self.console)
+        saved = self._view
+        try:
+            # Reuse the live session's reader and screen rather than opening a
+            # second Live, which would fight the one already running.
+            await viewer.run_within(self.keys, self.publish_raw)
+        finally:
+            self._view = saved
+
+    def publish_raw(self, view: TableView) -> None:
+        self._view = view
 
     # ----------------------------------------------------------- bookkeeping
 

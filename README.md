@@ -203,6 +203,24 @@ brute-force oracle and the full 2,598,960-hand category census, and the betting 
 is driven by a fuzz harness that checks chip conservation and every other invariant after
 *each individual action* across 40,000 randomized hands.
 
+## Revisiting hands
+
+Every hand is replayable, because the log stores the RNG seed rather than just a description of
+what happened. Replaying the recorded actions through a freshly seeded engine reproduces the
+identical deal, so a replay is real engine state drawn by the normal renderer — and a
+determinism check every time you open one.
+
+```bash
+poker hands        # list recent hands, newest last
+poker hands 50     # …the last 50
+poker hand 42      # step through hand 42
+```
+
+Pressing `r` between hands replays the one you just finished without leaving the game.
+
+In a replay every hand is face up, folds included — it's your own history, there's nothing
+left to hide. `←`/`→` step, `s` jumps to the end, `a` back to the deal, `q` leaves.
+
 ## Sessions
 
 Stacks carry over, and a session under 12 hours old resumes automatically. Everything lands in

@@ -274,7 +274,8 @@ def test_the_gate_shows_the_hand_result_and_the_options(tmp_path: Path) -> None:
     run_gate(app, [])
     line = next(f["input_line"] for f in reversed(frames) if "input_line" in f)
     bar = next(f["action_bar"] for f in reversed(frames) if "action_bar" in f)
-    assert "next hand" in line.hint and "quit" in line.hint
+    assert "next" in line.hint and "quit" in line.hint
+    assert "replay" in line.hint
     assert bar.message
 
 
@@ -344,3 +345,33 @@ def test_no_offline_notice_when_everything_is_fine(tmp_path: Path) -> None:
     app.console = Console(theme=THEME, file=_io.StringIO(), width=100)
     app._print_farewell()
     assert "Played offline" not in app.console.file.getvalue()
+
+
+def test_r_opens_a_replay_without_advancing(tmp_path: Path) -> None:
+    """Revisiting a hand must not deal the next one."""
+    from poker.ui import keys as K
+
+    app = make_app(tmp_path)
+
+    async def go():
+        # Play one hand so there is something on disk to replay.
+        app.cfg = dataclasses.replace(app.cfg, demo_hands=1)
+        await app.play_hand()
+        app.store.append_hand(app.record)
+        app.cfg = dataclasses.replace(app.cfg, demo_hands=0)
+
+        task = asyncio.ensure_future(app.wait_for_next_hand())
+        await asyncio.sleep(0.01)
+        app.keys.feed("r")                 # enter the replay
+        await asyncio.sleep(0.05)
+        assert not task.done(), "'r' must not advance the hand"
+        assert app._view.banner.startswith("REPLAY")
+
+        app.keys.feed("q")                 # leave the replay
+        await asyncio.sleep(0.05)
+        assert not task.done(), "leaving the replay must not advance either"
+
+        app.keys.feed(K.KEY_ENTER)
+        await asyncio.wait_for(task, 0.5)
+
+    asyncio.run(go())

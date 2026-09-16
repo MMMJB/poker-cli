@@ -31,6 +31,7 @@ def build_seats(
 
     out: list[SeatView] = []
     for p in state.players:
+        # You always know your own hand, including one you folded.
         show = p.seat == hero or p.seat in reveal or p.revealed
         out.append(SeatView(
             seat=p.seat,

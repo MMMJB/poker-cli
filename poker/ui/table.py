@@ -137,10 +137,15 @@ def _draw_header(canvas: Canvas, view: TableView, layout: Layout) -> None:
     left = f" {money(view.small_blind)}/{money(view.big_blind)} NL Hold'em · 6-max"
     canvas.put(2, y, left, "title")
 
-    profit = signed_money(view.session_profit)
-    right = f"Hand #{view.hand_id}    Session {profit} ({view.hands_played} hands)"
-    canvas.put(layout.cols - len(right) - 2, y, right,
-               "seat.stack" if view.session_profit >= 0 else "prompt.error")
+    if view.session_label:
+        right = f"Hand #{view.hand_id}    {view.session_label}"
+        style = "subtle"
+    else:
+        profit = signed_money(view.session_profit)
+        right = (f"Hand #{view.hand_id}    Session {profit} "
+                 f"({view.hands_played} hands)")
+        style = "seat.stack" if view.session_profit >= 0 else "prompt.error"
+    canvas.put(layout.cols - len(right) - 2, y, right, style)
 
     if not view.review_on:
         tag = "review off"

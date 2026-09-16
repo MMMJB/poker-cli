@@ -129,6 +129,8 @@ class TableView:
     big_blind: int = 3
     session_profit: int = 0
     hands_played: int = 0
+    session_label: str = ""
+    """Replaces the session P/L in the header when set (used by replays)."""
     log_lines: tuple[tuple[str, str], str | tuple] = ()
     """Recent action lines as ``(text, style)`` pairs."""
     talk: str = ""
