@@ -105,8 +105,14 @@ def _too_small(cols: int, rows: int) -> Canvas:
 def render_frame(view: TableView, layout: Layout, tick: float) -> Canvas:
     canvas = Canvas(layout.cols, layout.rows)
 
+    collapsed = input_rows_needed(view) == 1
+
     canvas.box(0, 0, layout.cols, layout.rows, "chrome", ROUNDED)
     for row in layout.sep_rows:
+        # The freed row moves to the table side of the separator, so the frame
+        # keeps its height and the hero gains a little breathing space.
+        if collapsed and row == layout.input_sep:
+            row += 1
         if 0 < row < layout.rows - 1:
             canvas.put(0, row, "├" + "─" * (layout.cols - 2) + "┤",
                        "chrome")
@@ -121,7 +127,7 @@ def render_frame(view: TableView, layout: Layout, tick: float) -> Canvas:
         _draw_seats(canvas, view, layout, tick)
         _draw_bets(canvas, view, layout)
 
-    _draw_action_bar(canvas, view, layout)
+    _draw_action_bar(canvas, view, layout, collapsed)
     _draw_log(canvas, view, layout)
 
     if view.banner:
@@ -295,7 +301,22 @@ def _draw_bets(canvas: Canvas, view: TableView, layout: Layout) -> None:
             canvas.put(slot.bet_x, slot.bet_y, text, "bet")
 
 
-def _draw_action_bar(canvas: Canvas, view: TableView, layout: Layout) -> None:
+def input_rows_needed(view: TableView) -> int:
+    """How many rows the input block actually needs.
+
+    The status row only earns its place when it has something to say: a live
+    action prompt, a between-hands summary, or somebody talking. The rest of
+    the time -- waiting on an opponent, or drafting a move -- one row is enough,
+    and the spare one is better spent as space under the hero.
+    """
+    bar = view.action_bar
+    if bar.active or bar.message or view.talk:
+        return 2
+    return 1
+
+
+def _draw_action_bar(canvas: Canvas, view: TableView, layout: Layout,
+                     collapsed: bool = False) -> None:
     """The status line above the input: pot, price, and what is legal."""
     bar = view.action_bar
     y = layout.action_y
@@ -319,7 +340,7 @@ def _draw_action_bar(canvas: Canvas, view: TableView, layout: Layout) -> None:
             canvas.put(2, y, f'"{view.talk}"'[: layout.cols - 20], "talk")
             speaker = f"\u2014 {view.talk_speaker}"
             canvas.put(layout.cols - len(speaker) - 2, y, speaker, "muted")
-        _draw_input_line(canvas, view, layout)
+        _draw_input_line(canvas, view, layout, show_hint=collapsed)
         return
 
     hint = view.input_line.hint
@@ -377,7 +398,8 @@ def _truncate_at_separator(text: str, room: int) -> str:
     return text[:cut].rstrip() if cut > 0 else text[:room]
 
 
-def _draw_input_line(canvas: Canvas, view: TableView, layout: Layout) -> None:
+def _draw_input_line(canvas: Canvas, view: TableView, layout: Layout,
+                     show_hint: bool = False) -> None:
     """The editable command line, with a visible block cursor.
 
     Drawn in three pieces so the cell under the cursor can be inverted: that is
@@ -385,6 +407,9 @@ def _draw_input_line(canvas: Canvas, view: TableView, layout: Layout) -> None:
 
     A draft -- typed while someone else is still to act -- is drawn in grey, so
     it reads as prepared rather than pending submission.
+
+    ``show_hint`` is set when this is the only input row, in which case the
+    hint has nowhere else to live and shares it.
     """
     line = view.input_line
     y = layout.prompt_y
@@ -394,7 +419,7 @@ def _draw_input_line(canvas: Canvas, view: TableView, layout: Layout) -> None:
     text_style = "prompt.draft" if line.draft else "prompt"
     cursor_style = "prompt.draft.cursor" if line.draft else "prompt.cursor"
 
-    prompt = "› "
+    prompt = "\u203a "
     canvas.put(2, y, prompt, "prompt.draft" if line.draft else "prompt.hint")
     x = 2 + len(prompt)
 
@@ -403,17 +428,26 @@ def _draw_input_line(canvas: Canvas, view: TableView, layout: Layout) -> None:
     canvas.put(x + len(before), y, at, cursor_style)
     canvas.put(x + len(before) + 1, y, after, text_style)
 
+    right_edge = layout.cols - 2
+    if show_hint:
+        hint = _fitting_hint(line, layout.cols - x - len(line.text) - 6)
+        if hint:
+            right_edge = layout.cols - len(hint) - 2
+            canvas.put(right_edge, y, hint, "prompt.hint")
+
     tail_x = x + len(line.text) + 3
-    room = max(0, layout.cols - tail_x - 2)
+    room = max(0, right_edge - tail_x - 1)
     if line.draft:
         # No preview while drafting: the legal actions are not known until the
         # action reaches you, and a raise that is legal now may not be by then.
-        note = "ready when it's your turn" if line.text.strip() else ""
+        # The hint already says as much when it is on this row.
+        note = "" if show_hint else (
+            "ready when it's your turn" if line.text.strip() else "")
         canvas.put(tail_x, y, note[:room], "prompt.draft")
     elif line.error:
         canvas.put(tail_x, y, line.error[:room], "prompt.error")
     elif line.preview:
-        canvas.put(tail_x, y, f"↵ {line.preview}"[:room], "prompt.preview")
+        canvas.put(tail_x, y, f"\u21b5 {line.preview}"[:room], "prompt.preview")
 
 
 def _draw_log(canvas: Canvas, view: TableView, layout: Layout) -> None:

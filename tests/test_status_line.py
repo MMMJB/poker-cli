@@ -131,3 +131,110 @@ def test_an_absurdly_long_message_is_cut_at_a_separator() -> None:
 def test_a_hint_with_no_short_form_still_fits() -> None:
     _, prompt = rows_for(MESSAGES[0], COMPACT, hint=LONG_HINT, short="")
     assert len(prompt.rstrip()) <= COMPACT.cols
+
+
+# --------------------------------------------------------------------------
+# The input block collapses to one row when the status row has nothing to say
+# --------------------------------------------------------------------------
+
+def view_for(**kw) -> TableView:
+    base = dict(hand_id=61, seats=SEATS, hero_seat=0, button=0)
+    return TableView(**{**base, **kw})
+
+
+# The real draft hints, so the rendering assertions below test what ships.
+from poker.app.input import DRAFT_HINT, DRAFT_HINT_SHORT  # noqa: E402
+
+DRAFT = InputLine(active=True, text="raise 40", cursor=8, draft=True,
+                  hint=DRAFT_HINT, hint_short=DRAFT_HINT_SHORT)
+LIVE = InputLine(active=True, text="raise 60", cursor=8, preview="raise to $60",
+                 hint="fold  ·  call 24  ·  raise")
+
+
+def test_one_row_while_waiting_on_an_opponent() -> None:
+    from poker.ui.table import input_rows_needed
+
+    assert input_rows_needed(view_for(input_line=DRAFT)) == 1
+
+
+def test_one_row_when_nothing_is_happening() -> None:
+    from poker.ui.table import input_rows_needed
+
+    assert input_rows_needed(view_for()) == 1
+
+
+def test_two_rows_when_it_is_your_turn() -> None:
+    from poker.ui.table import input_rows_needed
+
+    view = view_for(action_bar=ActionBar(active=True, pot=48), input_line=LIVE)
+    assert input_rows_needed(view) == 2
+
+
+def test_two_rows_between_hands() -> None:
+    from poker.ui.table import input_rows_needed
+
+    view = view_for(action_bar=ActionBar(active=False, message="Hand #61: you won $92."),
+                    input_line=InputLine(active=True, hint=LONG_HINT))
+    assert input_rows_needed(view) == 2
+
+
+def test_two_rows_when_someone_is_talking() -> None:
+    from poker.ui.table import input_rows_needed
+
+    view = view_for(talk="I'm never folding tonight.", talk_speaker="Tank",
+                    input_line=DRAFT)
+    assert input_rows_needed(view) == 2
+
+
+def render(view: TableView, layout) -> list[str]:
+    from rich.console import Console
+    from poker.ui.table import render_frame
+
+    console = Console(theme=THEME, width=layout.cols + 1, height=layout.rows + 2)
+    return ["".join(seg.text for seg in row)
+            for row in render_frame(view, layout, 0.0).rows(console)]
+
+
+@pytest.mark.parametrize("layout", [FULL, COMPACT], ids=["full", "compact"])
+def test_the_frame_keeps_its_height_either_way(layout) -> None:
+    """The freed row is given back to the table, not removed from the frame."""
+    one = render(view_for(input_line=DRAFT), layout)
+    two = render(view_for(action_bar=ActionBar(active=True, pot=48),
+                          input_line=LIVE), layout)
+    assert len(one) == len(two) == layout.rows
+
+
+@pytest.mark.parametrize("layout", [FULL, COMPACT], ids=["full", "compact"])
+def test_collapsing_leaves_a_blank_row_under_the_hero(layout) -> None:
+    lines = render(view_for(input_line=DRAFT), layout)
+    hero = layout.slot_for(0, 0, 6)
+    below = hero.y + layout.seat_h        # first row under the hero's box
+
+    # That row is blank, and the separator has moved down one to make it so.
+    assert lines[below].strip("│ ") == "", f"row {below} is not blank"
+    assert lines[layout.input_sep].strip("│ ") == ""
+    assert "├" in lines[layout.input_sep + 1], "separator did not move down"
+
+
+@pytest.mark.parametrize("layout", [FULL, COMPACT], ids=["full", "compact"])
+def test_expanded_keeps_the_separator_where_it_was(layout) -> None:
+    lines = render(view_for(action_bar=ActionBar(active=True, pot=48),
+                            input_line=LIVE), layout)
+    assert "├" in lines[layout.input_sep]
+
+
+@pytest.mark.parametrize("layout", [FULL, COMPACT], ids=["full", "compact"])
+def test_a_collapsed_row_still_shows_the_input_and_its_hint(layout) -> None:
+    """With only one row, the hint has nowhere else to go, so it shares it."""
+    lines = render(view_for(input_line=DRAFT), layout)
+    row = lines[layout.prompt_y]
+    assert "raise 40" in row
+    assert "turn" in row, "the hint vanished when the row collapsed"
+    assert len(row.rstrip()) <= layout.cols
+
+
+@pytest.mark.parametrize("layout", [FULL, COMPACT], ids=["full", "compact"])
+def test_the_collapsed_row_does_not_double_up_on_notes(layout) -> None:
+    """The draft note and the hint say the same thing; only one should show."""
+    row = render(view_for(input_line=DRAFT), layout)[layout.prompt_y]
+    assert "ready when it's your turn" not in row

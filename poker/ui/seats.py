@@ -60,6 +60,13 @@ class Layout:
     log_y: int
     log_lines: int
     sep_rows: tuple[int, ...]
+    input_sep: int
+    """The separator directly above the input block.
+
+    When the input collapses to a single row this moves down one, which hands
+    the freed row back to the table as blank space under the hero rather than
+    letting the whole frame change height.
+    """
 
     def ring(self, num_seats: int) -> tuple[str, ...]:
         try:
@@ -103,6 +110,7 @@ FULL = Layout(
     log_y=29,
     log_lines=2,
     sep_rows=(2, 25, 28, 31),
+    input_sep=25,
 )
 
 COMPACT = Layout(
@@ -136,6 +144,7 @@ COMPACT = Layout(
     log_y=22,
     log_lines=1,
     sep_rows=(2, 18, 21, 23),
+    input_sep=18,
 )
 
 

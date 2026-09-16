@@ -26,6 +26,7 @@ from poker.ui.keys import KeyReader
 from poker.ui.model import ActionBar, InputLine
 
 DRAFT_HINT = "not your turn yet \u2014 preparing your move"
+DRAFT_HINT_SHORT = "preparing \u2014 not your turn"
 
 HELP_TEXT = (
     "fold / f    check / k    call / c    bet <amt>    raise <amt>    all-in / a"
@@ -141,6 +142,7 @@ class ActionPrompt:
             text=self._draft.text,
             cursor=self._draft.cursor,
             hint=hint,
+            hint_short=DRAFT_HINT_SHORT,
             draft=True,
         ))
 
