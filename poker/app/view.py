@@ -20,10 +20,12 @@ def build_seats(
     acting: int | None = None,
     thinking: int | None = None,
     winners: dict[int, int] | None = None,
+    win_labels: dict[int, str] | None = None,
     reveal: set[int] | None = None,
 ) -> tuple[SeatView, ...]:
     state = engine.state
     winners = winners or {}
+    win_labels = win_labels or {}
     reveal = reveal or set()
     hero = table.human_seat
 
@@ -43,6 +45,7 @@ def build_seats(
             is_acting=p.seat == acting,
             is_winner=p.seat in winners,
             won=winners.get(p.seat, 0),
+            win_label=win_labels.get(p.seat, "WINS"),
             thinking=p.seat == thinking,
         ))
     return tuple(out)
@@ -61,6 +64,7 @@ def build_view(
         acting=kw.pop("acting", None),
         thinking=kw.pop("thinking", None),
         winners=kw.pop("winners", None),
+        win_labels=kw.pop("win_labels", None),
         reveal=kw.pop("reveal", None),
     )
     return base.with_(
@@ -94,6 +98,33 @@ def action_bar_from(legal, pot: int) -> ActionBar:
         max_to=legal.max_to,
         stack=legal.stack,
     )
+
+
+def win_labels_for(result) -> dict[int, str]:
+    """Label each winner's badge by which pot they actually took.
+
+    With a single pot everything is just "WINS".  Once a short stack is all in
+    the hand can have several winners who are not splitting anything -- the
+    short stack wins only up to what it matched, and the rest goes to the best
+    remaining hand.  Labelling that "MAIN" and "SIDE" is the difference between
+    a readable showdown and one that looks like a chop.
+    """
+    if len(result.pots) <= 1:
+        return {}
+
+    labels: dict[int, str] = {}
+    by_seat: dict[int, set[int]] = {}
+    for award in result.awards:
+        by_seat.setdefault(award.seat, set()).add(award.pot_index)
+
+    for seat, indices in by_seat.items():
+        if len(indices) == len(result.pots):
+            labels[seat] = "WINS"        # took everything; nothing to qualify
+        elif 0 in indices:
+            labels[seat] = "MAIN"
+        else:
+            labels[seat] = "SIDE"
+    return labels
 
 
 def street_tag(street: Street) -> str:

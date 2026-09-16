@@ -203,7 +203,7 @@ def _seat_note(seat) -> str:
     if seat.note:
         return seat.note
     if seat.is_winner and seat.won:
-        return f"WINS {money(seat.won)}"
+        return f"{seat.win_label} {money(seat.won)}"
     if seat.folded:
         return "FOLDED"
     if seat.all_in:

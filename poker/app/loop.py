@@ -26,7 +26,7 @@ from poker.app.commands import QUIT, TOGGLE_REVIEW
 from poker.app.input import ActionPrompt
 from poker.app.review import ReviewCoach
 from poker.app.session import HandRecord, SessionStore
-from poker.app.view import build_view, street_tag
+from poker.app.view import build_view, street_tag, win_labels_for
 from poker.config import TIERS, Config
 from poker.engine.actions import Action
 from poker.engine.state import GameConfig, Street
@@ -305,12 +305,26 @@ class App:
         for award in result.awards:
             winners[award.seat] = winners.get(award.seat, 0) + award.amount
 
+        labels = win_labels_for(result)
         reveal = set(result.shown)
-        self.refresh_table(winners=winners, reveal=reveal)
+        self.refresh_table(winners=winners, win_labels=labels, reveal=reveal)
 
+        if len(result.pots) > 1:
+            self._note(
+                "  ".join(
+                    f"{'main' if i == 0 else 'side'} {money(pot.amount)}"
+                    for i, pot in enumerate(result.pots)
+                ),
+                "subtle",
+            )
         for seat, amount in winners.items():
             name = "You" if seat == self.cfg.hero_seat else self.table.seats[seat].name
-            self._note(f"{name} wins {money(amount)}", "seat.winner")
+            which = labels.get(seat, "")
+            what = {
+                "MAIN": " the main pot",
+                "SIDE": " a side pot",
+            }.get(which, "")
+            self._note(f"{name} wins{what} {money(amount)}", "seat.winner")
 
         self.table.settle(result)
         self.record = self._build_record(result)

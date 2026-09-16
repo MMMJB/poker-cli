@@ -120,6 +120,10 @@ submit something the rules would reject.
 The board is centred in the terminal. Needs at least 80×24; it uses a roomier layout at
 100×32 and above.
 
+**At showdown**, when a short stack is all in the pot splits and there can be several winners
+who are not splitting anything. Badges say `MAIN` and `SIDE` in that case, so it doesn't read
+as a chop, and the log prints the pot breakdown.
+
 **Between hands**, nothing is dealt until you ask for it — `enter` for the next hand, `v` to
 toggle reviews, `q` to quit. The review, if there is one, stays on screen while you decide.
 

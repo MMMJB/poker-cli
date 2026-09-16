@@ -29,6 +29,12 @@ class SeatView:
     is_acting: bool = False
     is_winner: bool = False
     won: int = 0
+    win_label: str = "WINS"
+    """MAIN or SIDE when a hand splits into several pots.
+
+    Two bare "WINS" badges read as a chop, which is the opposite of what a
+    side pot means -- the short stack could only win what it matched.
+    """
     thinking: bool = False
     note: str = ""
     """Short status word shown in the seat: FOLDED, ALL-IN, WINS $174."""
